@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Terrain Walk</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #87ceeb;
+      font-family: system-ui, sans-serif; -webkit-user-select: none; user-select: none;
+      -webkit-touch-callout: none; overscroll-behavior: none; }
+    canvas { display: block; width: 100vw; height: 100dvh; touch-action: none; }
+    #start { position: fixed; inset: 0; display: grid; place-items: center; text-align: center;
+      background: rgba(20, 50, 80, 0.55); color: #fff; cursor: pointer; }
+    #start > div { padding: 1.2em 1.6em; background: rgba(0,0,0,.35); border-radius: 12px; line-height: 1.5; }
+    #start h1 { margin: 0 0 .3em; font-size: 1.6rem; }
+    #stick { position: fixed; left: max(24px, env(safe-area-inset-left)); bottom: max(24px, env(safe-area-inset-bottom));
+      width: 120px; height: 120px; border-radius: 50%; border: 2px solid rgba(255,255,255,.6);
+      background: rgba(255,255,255,.15); touch-action: none; display: none; }
+    #knob { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%;
+      background: rgba(255,255,255,.7); }
+    #hud { position: fixed; top: 8px; left: 10px; color: #fff; font-size: 12px; text-shadow: 0 1px 2px #000; pointer-events: none; }
+    #cross { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%;
+      background: rgba(255,255,255,.7); pointer-events: none; }
+    #new { position: fixed; top: 8px; right: 10px; padding: 6px 10px; border-radius: 8px; border: 0;
+      background: rgba(0,0,0,.4); color: #fff; font-size: 13px; }
+  </style>
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+  <div id="start"><div>
+    <h1>Terrain Walk</h1>
+    <div>Tap to start<br><small>Phone: left stick to move, drag right side to look<br>
+    Desktop: WASD / arrows + mouse (click to capture), Shift to run</small></div>
+  </div></div>
+  <div id="stick"><div id="knob"></div></div>
+  <div id="cross"></div>
+  <div id="hud"></div>
+  <button id="new">New map</button>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>
