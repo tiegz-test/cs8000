@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { wornTexture, glassDirtTexture } from './wear.js';
 
 // Mech cockpit overlay: a curved red glass canopy and a control deck along the
 // bottom of the view. It lives in its own scene and camera, rendered after the
@@ -16,15 +17,17 @@ function glassMaterial(sunDir) {
     uniforms: {
       uViewToWorld: { value: new THREE.Matrix3() }, // main camera rotation, set every frame
       uSun: { value: sunDir.clone() },
+      uDirt: { value: glassDirtTexture() },
     },
-    vertexShader: `varying vec3 vPos; varying vec3 vN;
+    vertexShader: `varying vec3 vPos; varying vec3 vN; varying vec2 vUv;
       void main() {
+        vUv = uv;
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         vPos = mv.xyz; vN = normalize(normalMatrix * normal);
         gl_Position = projectionMatrix * mv;
       }`,
-    fragmentShader: `varying vec3 vPos; varying vec3 vN;
-      uniform mat3 uViewToWorld; uniform vec3 uSun;
+    fragmentShader: `varying vec3 vPos; varying vec3 vN; varying vec2 vUv;
+      uniform mat3 uViewToWorld; uniform vec3 uSun; uniform sampler2D uDirt;
 
       vec3 skyColor(vec3 d) {
         float h = clamp(d.y, 0.0, 1.0);
@@ -164,9 +167,9 @@ function knobTexture() {
 
 function makeDeck() {
   const deck = new THREE.Group();
-  const drab = new THREE.MeshStandardMaterial({ color: 0x383d2f, metalness: 0.45, roughness: 0.65 });   // olive-drab panel
-  const plateMat = new THREE.MeshStandardMaterial({ color: 0x23271e, metalness: 0.3, roughness: 0.8 });  // recessed plates
-  const rimMat = new THREE.MeshStandardMaterial({ color: 0x5a5f48, metalness: 0.6, roughness: 0.5 });
+  const drab = new THREE.MeshStandardMaterial({ map: wornTexture({ base: '#4a5140', seed: 3, repeat: true }), metalness: 0.45, roughness: 0.7 });   // olive-drab panel
+  const plateMat = new THREE.MeshStandardMaterial({ map: wornTexture({ base: '#2f3427', seed: 8, wear: 0.7, repeat: true }), metalness: 0.3, roughness: 0.85 });  // recessed plates
+  const rimMat = new THREE.MeshStandardMaterial({ map: wornTexture({ base: '#70755c', seed: 12, w: 256, h: 64, wear: 0.6, repeat: true }), metalness: 0.6, roughness: 0.55 });
   const rubber = new THREE.MeshStandardMaterial({ color: 0x15170f, metalness: 0.1, roughness: 0.85 });
   const steel = new THREE.MeshStandardMaterial({ color: 0x8c9096, metalness: 0.9, roughness: 0.35 });
   const brass = new THREE.MeshStandardMaterial({ color: 0x8a6a2a, metalness: 0.8, roughness: 0.35 });
@@ -345,6 +348,137 @@ function makeDeck() {
   return deck;
 }
 
+// Hatch set into the canopy: a curved steel door on the sphere between two ribs.
+function patchGeometry(center, yawA, yawB, p0, p1, radius, flare = 1.12, nx = 8, ny = 24) {
+  const pos = [], uv = [], idx = [];
+  for (let j = 0; j <= ny; j++) {
+    const v = j / ny, p = p0 + (p1 - p0) * v;
+    const k = flare - (flare - 1) * ((p - -0.6) / 0.93);      // same flare as the ribs
+    for (let i = 0; i <= nx; i++) {
+      const u = i / nx, yaw = (yawA + (yawB - yawA) * u) * k;
+      const q = onGlass(center, yaw, p, radius);
+      pos.push(q.x, q.y, q.z); uv.push(u, v);
+    }
+  }
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const a = j * (nx + 1) + i, b = a + 1, c = a + nx + 1, d = c + 1;
+    idx.push(a, c, b, b, c, d);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+
+function makeDoor(center, hazardMat) {
+  const group = new THREE.Group();
+  const Rd = GLASS_RADIUS * 0.975;
+  const YA = 0.33, YB = 0.6, P0 = -0.55, P1 = 0.3;           // door extents (yaw, pitch)
+  const place = (obj, yaw, pitch, r = Rd - 0.008) => {
+    const k = 1.12 - 0.12 * ((pitch + 0.6) / 0.93);
+    obj.position.copy(onGlass(center, yaw * k, pitch, r));
+    obj.lookAt(center);                                         // +Z faces the pilot
+    group.add(obj);
+    return obj;
+  };
+
+  const steel = new THREE.MeshStandardMaterial({ color: 0xa0a4a8, metalness: 0.9, roughness: 0.4 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x15170f, metalness: 0.3, roughness: 0.8 });
+  const doorMat = new THREE.MeshStandardMaterial({
+    map: wornTexture({ base: '#4e5a3f', seed: 77, w: 512, h: 1024, wear: 1.5 }),
+    metalness: 0.5, roughness: 0.65, side: THREE.DoubleSide,
+  });
+
+  // door leaf
+  const leaf = new THREE.Mesh(patchGeometry(center, YA, YB, P0, P1, Rd), doorMat);
+  leaf.renderOrder = 0;
+  group.add(leaf);
+  // raised frame around the leaf
+  const edge = (pts, r) => { const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, r, 6), steel); group.add(m); };
+  const pt = (yaw, pitch, r = Rd - 0.004) => { const k = 1.12 - 0.12 * ((pitch + 0.6) / 0.93); return onGlass(center, yaw * k, pitch, r); };
+  const line = (ya, pa, yb, pb) => Array.from({ length: 21 }, (_, i) => pt(ya + (yb - ya) * i / 20, pa + (pb - pa) * i / 20));
+  edge(line(YA, P0, YA, P1), 0.007); edge(line(YB, P0, YB, P1), 0.007);
+  edge(line(YA, P0, YB, P0), 0.007); edge(line(YA, P1, YB, P1), 0.007);
+  // inner panel line (pressed recess)
+  const inset = 0.03;
+  for (const pts of [line(YA + inset, P0 + 0.05, YA + inset, P1 - 0.05), line(YB - inset, P0 + 0.05, YB - inset, P1 - 0.05),
+    line(YA + inset, P0 + 0.05, YB - inset, P0 + 0.05), line(YA + inset, P1 - 0.05, YB - inset, P1 - 0.05)]) {
+    const m = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 40, 0.0035, 6), dark);
+    group.add(m);
+  }
+
+  // rivets along the edges
+  const rivetGeo = new THREE.SphereGeometry(0.006, 8, 6);
+  for (let i = 0; i < 10; i++) {
+    const p = P0 + 0.03 + (P1 - P0 - 0.06) * i / 9;
+    for (const y of [YA + 0.012, YB - 0.012]) place(new THREE.Mesh(rivetGeo, steel), y, p);
+  }
+  for (let i = 0; i < 5; i++) {
+    const y = YA + 0.04 + (YB - YA - 0.08) * i / 4;
+    for (const p of [P0 + 0.012, P1 - 0.012]) place(new THREE.Mesh(rivetGeo, steel), y, p);
+  }
+
+  // hinges on the outer edge
+  for (const p of [-0.42, -0.1, 0.2]) {
+    const h = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.011, 0.075, 12), steel);
+    place(h, YB + 0.008, p, Rd + 0.002);
+    h.lookAt(center);                 // restore facing, then stand the barrel upright
+    h.rotateX(Math.PI / 2);
+    const plateH = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.07, 0.006), dark);
+    place(plateH, YB - 0.02, p, Rd - 0.004);
+  }
+
+  // porthole
+  const portY = (YA + YB) / 2, portP = 0.1;
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.009, 10, 32), steel);
+  place(ring, portY, portP);
+  const pane = new THREE.Mesh(new THREE.CircleGeometry(0.05, 32),
+    new THREE.MeshStandardMaterial({ color: 0x1d2b33, metalness: 0.9, roughness: 0.12, transparent: true, opacity: 0.65 }));
+  place(pane, portY, portP, Rd - 0.004);
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const bolt = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.006, 8), steel);
+    bolt.rotation.x = Math.PI / 2;
+    const holder = new THREE.Group();
+    holder.add(bolt);
+    bolt.position.set(Math.cos(a) * 0.06, Math.sin(a) * 0.06, 0);
+    place(holder, portY, portP, Rd - 0.012);
+  }
+
+  // handle (lever on a round boss) with a lock lamp
+  const handleY = YA + 0.045, handleP = -0.12;
+  const boss = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.034, 0.014, 20), steel);
+  boss.rotation.x = Math.PI / 2;
+  const bossG = new THREE.Group(); bossG.add(boss);
+  place(bossG, handleY, handleP, Rd - 0.012);
+  const lever = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.1, 0.012), dark);
+  lever.position.set(0, 0.025, 0.012);
+  lever.rotation.z = 0.2;
+  bossG.add(lever);
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0x220a08, emissive: 0xff3b2a, emissiveIntensity: 1, roughness: 0.4 });
+  const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.008, 12), lampMat);
+  lamp.rotation.x = Math.PI / 2;
+  const lampG = new THREE.Group(); lampG.add(lamp);
+  place(lampG, handleY, handleP + 0.075, Rd - 0.011);
+
+  // stencils and hazard stripe
+  const stencil = (text, w, h, yaw, pitch, rot = 0) => {
+    const l = labelMesh(text, w, h); l.rotation.set(0, 0, 0);
+    const g = new THREE.Group(); g.add(l); g.rotation.z = rot;
+    place(g, yaw, pitch, Rd - 0.0045);
+    g.rotateZ(rot);
+  };
+  stencil('HATCH 02', 0.17, 0.034, portY, 0.24);
+  stencil('PULL', 0.09, 0.026, portY, -0.2);
+  stencil('NO STEP', 0.11, 0.026, portY, -0.5);
+  const strip = new THREE.Mesh(patchGeometry(center, YA + 0.015, YB - 0.015, -0.4, -0.34, Rd - 0.003), hazardMat);
+  group.add(strip);
+
+  return { group, lampMat };
+}
+
 export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize()) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 10);
@@ -367,7 +501,7 @@ export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize
   scene.add(glass);
 
   // canopy frame struts
-  const frameMat = new THREE.MeshStandardMaterial({ color: 0x1b1d20, metalness: 0.6, roughness: 0.5 });
+  const frameMat = new THREE.MeshStandardMaterial({ map: wornTexture({ base: '#2a2d26', seed: 21, w: 512, h: 128, wear: 0.45, repeat: true }), metalness: 0.6, roughness: 0.55 });
   const arc = (yaw0, yaw1, p0, p1, n = 24) => {
     const pts = [];
     for (let i = 0; i <= n; i++) {
@@ -382,7 +516,7 @@ export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize
   frame.add(strut(arc(-1.1, 1.1, 0.33, 0.33, 40), 0.022, frameMat));
   frame.add(strut(arc(-1.1, 1.1, 0.215, 0.215, 40), 0.012, trimMat));
   // ribs sweeping up to the top bow, plus corner pillars
-  for (const yaw of [-0.62, -0.46, -0.3, 0.3, 0.46, 0.62]) {
+  for (const yaw of [-0.62, -0.46, -0.3, 0.3, 0.62]) {   // right side: one wide panel is the door
     const pillar = Math.abs(yaw) > 0.6;
     frame.add(strut(arc(yaw * 1.12, yaw, -0.6, 0.33), pillar ? 0.026 : 0.014, frameMat));
   }
@@ -393,6 +527,10 @@ export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize
     frame.add(c);
   }
   scene.add(frame);
+
+  const hazardMat = new THREE.MeshBasicMaterial({ map: hazardTexture(), side: THREE.DoubleSide });
+  const door = makeDoor(center, hazardMat);
+  scene.add(door.group);
 
   const deck = makeDeck();
   scene.add(deck);
@@ -417,6 +555,7 @@ export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize
     tmp.t += dt;
     const t = tmp.t;
     deck.userData.update(t, info);
+    door.lampMat.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 2.4) ** 2 * (info.edge ? 3 : 1);
     if (t - tmp.lastScreen > 0.08) {
       tmp.lastScreen = t;
       deck.userData.screenTex.userData.draw(t, info);
