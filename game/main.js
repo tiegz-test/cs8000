@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
+import { BUILD } from './version.js';
 import { makeGrassTexture, breakUpTiling } from './grass.js';
 
 const SIZE = 600, SEGS = 220, EYE = 1.7;
@@ -160,7 +161,7 @@ function tick() {
   camera.position.copy(player.pos);
   camera.rotation.set(player.pitch, player.yaw, 0);
   renderer.render(scene, camera);
-  hud.textContent = `seed ${seed}  alt ${player.pos.y.toFixed(0)}m`;
+  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}`;
   requestAnimationFrame(tick);
 }
 tick();
