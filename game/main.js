@@ -22,7 +22,7 @@ scene.add(sun);
 
 let terrain, heightAt;
 const grass = makeGrassTexture();
-grass.repeat.set(160, 160); // tiles across the 600m terrain
+grass.repeat.set(64, 64); // ~9m tiles: big enough to read on a phone
 renderer.capabilities && (grass.anisotropy = renderer.capabilities.getMaxAnisotropy());
 const LOW = new THREE.Color(0x7ccf55), HIGH = new THREE.Color(0x0f4a1c);
 

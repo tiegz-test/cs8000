@@ -8,7 +8,7 @@ export function makeGrassTexture(size = 512) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = size;
   const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#d6e6c4';
+  ctx.fillStyle = "#e2efd2";
   ctx.fillRect(0, 0, size, size);
 
   // draw wrapped copies so edges tile seamlessly
@@ -19,12 +19,12 @@ export function makeGrassTexture(size = 512) {
   };
 
   // soft low-frequency patches
-  for (let i = 0; i < 90; i++) {
-    const x = rand() * size, y = rand() * size, r = 30 + rand() * 60;
+  for (let i = 0; i < 120; i++) {
+    const x = rand() * size, y = rand() * size, r = 40 + rand() * 90;
     const light = rand() > 0.5;
     wrapped(x, y, (px, py) => {
       const g = ctx.createRadialGradient(px, py, 0, px, py, r);
-      g.addColorStop(0, light ? 'rgba(240,250,215,0.35)' : 'rgba(150,185,120,0.3)');
+      g.addColorStop(0, light ? 'rgba(245,255,215,0.6)' : 'rgba(120,165,90,0.55)');
       g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g;
       ctx.fillRect(px - r, py - r, r * 2, r * 2);
@@ -33,13 +33,13 @@ export function makeGrassTexture(size = 512) {
 
   // blades
   ctx.lineCap = 'round';
-  for (let i = 0; i < 9000; i++) {
+  for (let i = 0; i < 5000; i++) {
     const x = rand() * size, y = rand() * size;
-    const len = 5 + rand() * 9, ang = -Math.PI / 2 + (rand() - 0.5) * 1.1;
+    const len = 14 + rand() * 18, ang = -Math.PI / 2 + (rand() - 0.5) * 1.1;
     const t = rand();
-    const l = 55 + t * 40; // lightness 55..95
-    ctx.strokeStyle = `hsla(${88 + rand() * 30}, ${35 + rand() * 25}%, ${l}%, ${0.35 + rand() * 0.4})`;
-    ctx.lineWidth = 0.8 + rand() * 1.2;
+    const l = 50 + t * 45; // lightness 50..95
+    ctx.strokeStyle = `hsla(${88 + rand() * 30}, ${35 + rand() * 25}%, ${l}%, ${0.45 + rand() * 0.45})`;
+    ctx.lineWidth = 1.6 + rand() * 2;
     wrapped(x, y, (px, py) => {
       ctx.beginPath();
       ctx.moveTo(px, py);
