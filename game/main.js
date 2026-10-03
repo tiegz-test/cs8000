@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
 import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
+import { makePines } from './trees.js';
 import { makeCockpit } from './cockpit.js';
 import { BUILD } from './version.js';
 import { makeGrassTexture, breakUpTiling } from './grass.js';
@@ -29,7 +30,7 @@ const clouds = makeClouds();
 scene.add(clouds);
 const cockpit = makeCockpit(SUN_DIR);
 
-let terrain, heightAt;
+let terrain, heightAt, trees;
 const grass = makeGrassTexture();
 grass.repeat.set(64, 64); // ~9m tiles: big enough to read on a phone
 renderer.capabilities && (grass.anisotropy = renderer.capabilities.getMaxAnisotropy());
@@ -66,6 +67,10 @@ function buildTerrain(seed) {
   player.pos.set(sx, heightAt(sx, sz) + EYE, sz);
   player.yaw = Math.atan2(-(px - sx), -(pz - sz));
   player.pitch = 0.12;
+
+  if (trees) { scene.remove(trees.group); trees.dispose(); }
+  trees = makePines({ heightAt, maxH, seed, size: SIZE, avoid: { x: sx, z: sz } });
+  scene.add(trees.group);
 }
 
 const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0 };
@@ -168,6 +173,7 @@ function tick() {
   const target = heightAt(player.pos.x, player.pos.z) + EYE;
   player.pos.y += (target - player.pos.y) * Math.min(1, dt * 12);
 
+  trees.update(player.pos);
   skyDome.position.copy(player.pos);
   clouds.userData.update(dt, player.pos);
   camera.position.copy(player.pos);
@@ -183,7 +189,7 @@ function tick() {
   });
   renderer.clearDepth();
   renderer.render(cockpit.scene, cockpit.camera);
-  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}`;
+  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}`;
   requestAnimationFrame(tick);
 }
 tick();
