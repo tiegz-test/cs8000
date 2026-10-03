@@ -22,7 +22,7 @@ function glassMaterial() {
       void main() {
         vec3 v = normalize(-vPos);
         float f = 1.0 - abs(dot(normalize(vN), v));       // grazing angle -> thicker-looking glass
-        float alpha = 0.10 + 0.45 * pow(f, 2.2);
+        float alpha = 0.20 + 0.45 * pow(f, 2.2);
         vec3 col = vec3(0.85, 0.06, 0.05);
         // two soft reflection streaks across the canopy
         float d = vPos.x * 0.8 + vPos.y;
@@ -50,15 +50,15 @@ function onGlass(center, yaw, pitch, r = GLASS_RADIUS * 0.99) {
 
 function makeScreenTexture() {
   const cv = document.createElement('canvas');
-  cv.width = 256; cv.height = 160;
+  cv.width = 352; cv.height = 200;
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
   const ctx = cv.getContext('2d');
   tex.userData.draw = (t, info) => {
     ctx.fillStyle = '#04140a';
-    ctx.fillRect(0, 0, 256, 160);
+    ctx.fillRect(0, 0, 352, 200);
     // radar
-    const cx = 70, cy = 80, r = 58;
+    const cx = 100, cy = 100, r = 90;
     ctx.strokeStyle = 'rgba(80,255,140,.5)';
     ctx.lineWidth = 1.5;
     for (const k of [1, 0.66, 0.33]) { ctx.beginPath(); ctx.arc(cx, cy, r * k, 0, Math.PI * 2); ctx.stroke(); }
@@ -76,12 +76,12 @@ function makeScreenTexture() {
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke();
     // readouts
     ctx.fillStyle = '#7dffaa';
-    ctx.font = 'bold 15px monospace';
-    ctx.fillText(`ALT ${String(Math.round(info.alt)).padStart(4, ' ')}m`, 140, 40);
-    ctx.fillText(`HDG ${String(Math.round(info.heading)).padStart(3, '0')}`, 140, 64);
-    ctx.fillText(`SPD ${info.speed.toFixed(1)}`, 140, 88);
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText(`ALT ${String(Math.round(info.alt)).padStart(4, ' ')}m`, 215, 55);
+    ctx.fillText(`HDG ${String(Math.round(info.heading)).padStart(3, '0')}`, 215, 90);
+    ctx.fillText(`SPD ${info.speed.toFixed(1)}`, 215, 125);
     ctx.fillStyle = Math.floor(t * 2) % 2 ? '#ff5544' : '#662218';
-    ctx.fillText('SYS OK', 140, 124);
+    ctx.fillText('SYS OK', 215, 165);
     tex.needsUpdate = true;
   };
   return tex;
@@ -111,10 +111,10 @@ function makeDeck() {
 
   // center screen in a bezel
   const screenTex = makeScreenTexture();
-  const bezel = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.012, 0.2), dark);
+  const bezel = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.012, 0.24), dark);
   bezel.position.set(0, 0.016, -0.19);
   top.add(bezel);
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.27, 0.17),
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.37, 0.21),
     new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false }));
   screen.rotation.x = -Math.PI / 2;
   screen.position.set(0, 0.023, -0.19);
@@ -130,7 +130,7 @@ function makeDeck() {
         const c = colors[(row + col + (side > 0 ? 1 : 0)) % colors.length];
         const mat = new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.6, roughness: 0.3 });
         const b = new THREE.Mesh(btnGeo, mat);
-        b.position.set(side * (0.21 + col * 0.045), 0.016, -0.1 - row * 0.05);
+        b.position.set(side * (0.27 + col * 0.04), 0.016, -0.1 - row * 0.05);
         top.add(b);
         blinkers.push({ mat, rate: 0.6 + ((row * 7 + col * 3 + (side > 0 ? 5 : 0)) % 9) * 0.35, phase: row + col * 1.7 });
       }
@@ -138,10 +138,10 @@ function makeDeck() {
     // toggle switches
     for (let i = 0; i < 4; i++) {
       const base = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.01, 0.03), dark);
-      base.position.set(side * (0.215 + i * 0.045), 0.014, -0.27);
+      base.position.set(side * (0.275 + i * 0.04), 0.014, -0.27);
       top.add(base);
       const lever = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.005, 0.035, 8), trim);
-      lever.position.set(side * (0.215 + i * 0.045), 0.03, -0.27);
+      lever.position.set(side * (0.275 + i * 0.04), 0.03, -0.27);
       lever.rotation.x = i % 2 ? 0.5 : -0.5;
       top.add(lever);
     }
@@ -162,18 +162,18 @@ function makeDeck() {
   // dial gauges flanking the screen
   for (const side of [-1, 1]) {
     const dial = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.01, 28), dark);
-    dial.position.set(side * 0.2 - side * 0.0, 0.016, -0.32);
-    dial.position.x = side * 0.165;
+    dial.position.set(side * 0.2 - side * 0.0, 0.016, -0.335);
+    dial.position.x = side * 0.245;
     top.add(dial);
     const face = new THREE.Mesh(new THREE.CircleGeometry(0.03, 28),
       new THREE.MeshBasicMaterial({ color: 0x1c2a22 }));
     face.rotation.x = -Math.PI / 2;
-    face.position.set(dial.position.x, 0.022, -0.32);
+    face.position.set(dial.position.x, 0.022, -0.335);
     top.add(face);
     const needle = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.002, 0.026),
       new THREE.MeshBasicMaterial({ color: 0xffaa33 }));
     needle.geometry.translate(0, 0, -0.013);
-    needle.position.set(dial.position.x, 0.024, -0.32);
+    needle.position.set(dial.position.x, 0.024, -0.335);
     top.add(needle);
     blinkers.push({ needle, side });
   }
@@ -213,10 +213,22 @@ export function makeCockpit() {
     }
     return pts;
   };
+  const trimMat = new THREE.MeshStandardMaterial({ color: 0x8a6a2a, metalness: 0.8, roughness: 0.35 });
   const frame = new THREE.Group();
-  frame.add(strut(arc(-0.62, -0.5, -0.6, 0.9), 0.022, frameMat));   // left pillar
-  frame.add(strut(arc(0.62, 0.5, -0.6, 0.9), 0.022, frameMat));     // right pillar
-  frame.add(strut(arc(-0.9, 0.9, 0.62, 0.62), 0.018, frameMat));    // top bow
+  // latitude bows across the top (pitch 0.33 is just inside the top edge of the view)
+  frame.add(strut(arc(-1.1, 1.1, 0.33, 0.33, 40), 0.022, frameMat));
+  frame.add(strut(arc(-1.1, 1.1, 0.215, 0.215, 40), 0.012, trimMat));
+  // ribs sweeping up to the top bow, plus corner pillars
+  for (const yaw of [-0.62, -0.46, -0.3, 0.3, 0.46, 0.62]) {
+    const pillar = Math.abs(yaw) > 0.6;
+    frame.add(strut(arc(yaw * 1.12, yaw, -0.6, 0.33), pillar ? 0.026 : 0.014, frameMat));
+  }
+  // brass collars where ribs meet the top bow
+  for (const yaw of [-0.62, -0.3, 0.3, 0.62]) {
+    const c = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 12), trimMat);
+    c.position.copy(onGlass(center, yaw, 0.33));
+    frame.add(c);
+  }
   scene.add(frame);
 
   const deck = makeDeck();
