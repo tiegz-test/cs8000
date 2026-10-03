@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
 import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
+import { makeRivers } from './rivers.js';
 import { makePines } from './trees.js';
 import { makeCockpit } from './cockpit.js';
 import { BUILD } from './version.js';
@@ -30,29 +31,39 @@ const clouds = makeClouds();
 scene.add(clouds);
 const cockpit = makeCockpit(SUN_DIR);
 
-let terrain, heightAt, trees;
+let terrain, heightAt, trees, rivers;
 const grass = makeGrassTexture();
 grass.repeat.set(64, 64); // ~9m tiles: big enough to read on a phone
 renderer.capabilities && (grass.anisotropy = renderer.capabilities.getMaxAnisotropy());
-const LOW = new THREE.Color(0x7ccf55), HIGH = new THREE.Color(0x0f4a1c);
+const LOW = new THREE.Color(0x7ccf55), HIGH = new THREE.Color(0x0f4a1c), MUD = new THREE.Color(0x6a5a38);
 
 function buildTerrain(seed) {
   if (terrain) { scene.remove(terrain); terrain.geometry.dispose(); terrain.material.dispose(); } // shared grass texture is kept
-  heightAt = makeHeightFn(seed);
+  const base = makeHeightFn(seed);
   const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEGS, SEGS);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position;
   const colors = new Float32Array(pos.count * 3);
+
+  // tallest peak (from the uncarved terrain) decides where we spawn
   let maxH = 1, px = 0, pz = 0;
   for (let i = 0; i < pos.count; i++) {
-    const y = heightAt(pos.getX(i), pos.getZ(i));
-    pos.setY(i, y);
+    const y = base(pos.getX(i), pos.getZ(i));
     if (y > maxH) { maxH = y; px = pos.getX(i); pz = pos.getZ(i); }
   }
+  const d = Math.hypot(px, pz) || 1, back = Math.min(150, d);
+  const sx = px - (px / d) * back, sz = pz - (pz / d) * back;
+
+  if (rivers) { scene.remove(rivers.group); rivers.dispose(); }
+  rivers = makeRivers({ base, seed, size: SIZE, maxH, avoid: { x: sx, z: sz } });
+  scene.add(rivers.group);
+  heightAt = rivers.heightAt;                 // base terrain with riverbeds carved in
+  for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
   const c = new THREE.Color();
   for (let i = 0; i < pos.count; i++) {
     const t = Math.min(1, pos.getY(i) / maxH);
     c.copy(LOW).lerp(HIGH, Math.pow(t, 0.8)); // higher = darker green
+    c.lerp(MUD, rivers.mud(pos.getX(i), pos.getZ(i)) * 0.85); // muddy riverbanks
     colors.set([c.r, c.g, c.b], i * 3);
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -62,14 +73,12 @@ function buildTerrain(seed) {
   terrain = new THREE.Mesh(geo, mat);
   scene.add(terrain);
   // spawn ~150m from the tallest peak, facing it
-  const d = Math.hypot(px, pz) || 1, back = Math.min(150, d);
-  const sx = px - (px / d) * back, sz = pz - (pz / d) * back;
   player.pos.set(sx, heightAt(sx, sz) + EYE, sz);
   player.yaw = Math.atan2(-(px - sx), -(pz - sz));
   player.pitch = 0.12;
 
   if (trees) { scene.remove(trees.group); trees.dispose(); }
-  trees = makePines({ heightAt, maxH, seed, size: SIZE, avoid: { x: sx, z: sz } });
+  trees = makePines({ heightAt, maxH, seed, size: SIZE, avoid: { x: sx, z: sz }, exclude: (x, z) => rivers.distance(x, z) < 11 });
   scene.add(trees.group);
 }
 
@@ -174,6 +183,7 @@ function tick() {
   player.pos.y += (target - player.pos.y) * Math.min(1, dt * 12);
 
   trees.update(player.pos);
+  rivers.update(dt);
   skyDome.position.copy(player.pos);
   clouds.userData.update(dt, player.pos);
   camera.position.copy(player.pos);
@@ -189,7 +199,7 @@ function tick() {
   });
   renderer.clearDepth();
   renderer.render(cockpit.scene, cockpit.camera);
-  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}`;
+  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rivers ${rivers.count}`;
   requestAnimationFrame(tick);
 }
 tick();
