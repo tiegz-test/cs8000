@@ -8,27 +8,51 @@ const GLASS_RADIUS = 1.5;
 const DECK_DEPTH = 0.6;    // distance from the eye to the deck's front edge
 const DECK_WIDTH = 1.0;    // design width; scaled down to fit narrow screens
 
-function glassMaterial() {
+// Reflective glass: a Fresnel reflection of a procedural sky (same gradient and
+// sun as the world sky), plus a sharp sun glint, over a thin red tint.
+function glassMaterial(sunDir) {
   return new THREE.ShaderMaterial({
     side: THREE.BackSide, transparent: true, depthWrite: false,
-    uniforms: { uTime: { value: 0 } },
+    uniforms: {
+      uViewToWorld: { value: new THREE.Matrix3() }, // main camera rotation, set every frame
+      uSun: { value: sunDir.clone() },
+    },
     vertexShader: `varying vec3 vPos; varying vec3 vN;
       void main() {
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
         vPos = mv.xyz; vN = normalize(normalMatrix * normal);
         gl_Position = projectionMatrix * mv;
       }`,
-    fragmentShader: `varying vec3 vPos; varying vec3 vN; uniform float uTime;
+    fragmentShader: `varying vec3 vPos; varying vec3 vN;
+      uniform mat3 uViewToWorld; uniform vec3 uSun;
+
+      vec3 skyColor(vec3 d) {
+        float h = clamp(d.y, 0.0, 1.0);
+        vec3 sky = mix(vec3(0.75, 0.89, 0.96), vec3(0.18, 0.5, 0.82), pow(h, 0.55));
+        vec3 ground = mix(vec3(0.30, 0.45, 0.22), vec3(0.08, 0.2, 0.08), clamp(-d.y * 2.0, 0.0, 1.0));
+        vec3 col = mix(ground, sky, smoothstep(-0.05, 0.05, d.y));
+        float s = max(dot(d, normalize(uSun)), 0.0);
+        col += vec3(1.0, 0.85, 0.55) * pow(s, 8.0) * 0.3;
+        col += vec3(1.0, 0.95, 0.8) * pow(s, 200.0) * 3.0;
+        return col;
+      }
+
       void main() {
-        vec3 v = normalize(-vPos);
-        float f = 1.0 - abs(dot(normalize(vN), v));       // grazing angle -> thicker-looking glass
-        float alpha = 0.20 + 0.45 * pow(f, 2.2);
-        vec3 col = vec3(0.85, 0.06, 0.05);
-        // two soft reflection streaks across the canopy
+        vec3 I = normalize(vPos);                       // eye -> glass point (view space)
+        vec3 n = -normalize(vN);                        // inward-facing normal
+        float f = 1.0 - abs(dot(n, -I));                // 0 head-on, 1 grazing
+        vec3 r = normalize(uViewToWorld * reflect(I, n));
+        float fres = 0.12 + 0.75 * pow(f, 2.5);         // reflectivity
+        vec3 refl = skyColor(r);
+
+        vec3 tint = vec3(0.85, 0.06, 0.05);
+        float alpha = 0.20 + 0.40 * pow(f, 2.2);        // red glass body
+        // soft window-light streaks that stay fixed on the canopy
         float d = vPos.x * 0.8 + vPos.y;
-        float streak = smoothstep(0.06, 0.0, abs(d - 0.55)) * 0.10 + smoothstep(0.025, 0.0, abs(d - 0.72)) * 0.08;
-        col += vec3(1.0, 0.75, 0.7) * streak * 4.0;
-        alpha += streak;
+        float streak = smoothstep(0.07, 0.0, abs(d - 0.55)) * 0.14 + smoothstep(0.03, 0.0, abs(d - 0.74)) * 0.10;
+
+        vec3 col = mix(tint, refl, clamp(fres, 0.0, 0.85)) + vec3(1.0, 0.8, 0.75) * streak;
+        alpha = clamp(alpha + (fres - 0.12) * 0.7 + streak, 0.0, 0.9);
         gl_FragColor = vec4(col, alpha);
       }`,
   });
@@ -182,7 +206,7 @@ function makeDeck() {
   return deck;
 }
 
-export function makeCockpit() {
+export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize()) {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 10);
 
@@ -198,7 +222,7 @@ export function makeCockpit() {
   const center = new THREE.Vector3(0, 0, 0.55);
   const glassGeo = new THREE.SphereGeometry(GLASS_RADIUS, 64, 40, 0, Math.PI * 2, 0, Math.PI * 0.62);
   glassGeo.rotateX(-Math.PI / 2);           // open side faces the pilot (+Z)
-  const glass = new THREE.Mesh(glassGeo, glassMaterial());
+  const glass = new THREE.Mesh(glassGeo, glassMaterial(sunDir));
   glass.position.copy(center);
   glass.renderOrder = 2;
   scene.add(glass);
@@ -248,7 +272,9 @@ export function makeCockpit() {
     deck.position.set(0, -halfH + 0.07 * s, -DECK_DEPTH);
   }
 
+  const rot4 = new THREE.Matrix4();
   function update(dt, info) {
+    glass.material.uniforms.uViewToWorld.value.setFromMatrix4(rot4.makeRotationFromQuaternion(info.camQuat));
     tmp.t += dt;
     const t = tmp.t;
     for (const b of deck.userData.blinkers) {
