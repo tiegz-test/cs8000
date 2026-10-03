@@ -23,6 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      - name: Stamp build SHA
+        run: echo "export const BUILD = '${GITHUB_SHA::7}';" > game/version.js
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
