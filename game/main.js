@@ -27,7 +27,7 @@ const skyDome = makeSkyDome(SUN_DIR);
 scene.add(skyDome);
 const clouds = makeClouds();
 scene.add(clouds);
-const cockpit = makeCockpit();
+const cockpit = makeCockpit(SUN_DIR);
 
 let terrain, heightAt;
 const grass = makeGrassTexture();
@@ -175,6 +175,8 @@ function tick() {
   renderer.clear();
   renderer.render(scene, camera);
   cockpit.update(dt, {
+    camQuat: camera.quaternion,
+    edge: Math.max(Math.abs(player.pos.x), Math.abs(player.pos.z)) > half - 15,
     alt: player.pos.y,
     heading: ((-THREE.MathUtils.radToDeg(player.yaw)) % 360 + 360) % 360,
     speed: dt > 0 ? Math.hypot(player.pos.x - prevX, player.pos.z - prevZ) / dt : 0,
