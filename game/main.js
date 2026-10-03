@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
+import { makeGrassTexture, breakUpTiling } from './grass.js';
 
 const SIZE = 600, SEGS = 220, EYE = 1.7;
 const SKY = 0x87ceeb;
@@ -20,10 +21,13 @@ sun.position.set(0.6, 1, 0.4);
 scene.add(sun);
 
 let terrain, heightAt;
+const grass = makeGrassTexture();
+grass.repeat.set(160, 160); // tiles across the 600m terrain
+renderer.capabilities && (grass.anisotropy = renderer.capabilities.getMaxAnisotropy());
 const LOW = new THREE.Color(0x7ccf55), HIGH = new THREE.Color(0x0f4a1c);
 
 function buildTerrain(seed) {
-  if (terrain) { scene.remove(terrain); terrain.geometry.dispose(); terrain.material.dispose(); }
+  if (terrain) { scene.remove(terrain); terrain.geometry.dispose(); terrain.material.dispose(); } // shared grass texture is kept
   heightAt = makeHeightFn(seed);
   const geo = new THREE.PlaneGeometry(SIZE, SIZE, SEGS, SEGS);
   geo.rotateX(-Math.PI / 2);
@@ -43,7 +47,9 @@ function buildTerrain(seed) {
   }
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geo.computeVertexNormals();
-  terrain = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+  const mat = new THREE.MeshLambertMaterial({ vertexColors: true, map: grass });
+  breakUpTiling(mat);
+  terrain = new THREE.Mesh(geo, mat);
   scene.add(terrain);
   // spawn ~150m from the tallest peak, facing it
   const d = Math.hypot(px, pz) || 1, back = Math.min(150, d);
