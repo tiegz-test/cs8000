@@ -1,25 +1,30 @@
 import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
+import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
 import { BUILD } from './version.js';
 import { makeGrassTexture, breakUpTiling } from './grass.js';
 
 const SIZE = 600, SEGS = 220, EYE = 1.7;
-const SKY = 0x87ceeb;
 
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(SKY);
-scene.fog = new THREE.Fog(SKY, 80, 420);
+scene.background = HORIZON.clone();
+scene.fog = new THREE.Fog(HORIZON, 80, 420); // matches the sky's horizon color
 const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 600);
 camera.rotation.order = 'YXZ';
 
 scene.add(new THREE.HemisphereLight(0xcfe8ff, 0x3a5a2a, 1.1));
+const SUN_DIR = sunDirection(40, 35); // azimuth 40deg (NE), 35deg above the horizon
 const sun = new THREE.DirectionalLight(0xfff2d0, 1.6);
-sun.position.set(0.6, 1, 0.4);
+sun.position.copy(SUN_DIR).multiplyScalar(100);
 scene.add(sun);
+const skyDome = makeSkyDome(SUN_DIR);
+scene.add(skyDome);
+const clouds = makeClouds();
+scene.add(clouds);
 
 let terrain, heightAt;
 const grass = makeGrassTexture();
@@ -158,6 +163,8 @@ function tick() {
   const target = heightAt(player.pos.x, player.pos.z) + EYE;
   player.pos.y += (target - player.pos.y) * Math.min(1, dt * 12);
 
+  skyDome.position.copy(player.pos);
+  clouds.userData.update(dt, player.pos);
   camera.position.copy(player.pos);
   camera.rotation.set(player.pitch, player.yaw, 0);
   renderer.render(scene, camera);
