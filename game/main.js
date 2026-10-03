@@ -176,6 +176,7 @@ function tick() {
   renderer.render(scene, camera);
   cockpit.update(dt, {
     camQuat: camera.quaternion,
+    edge: Math.max(Math.abs(player.pos.x), Math.abs(player.pos.z)) > half - 15,
     alt: player.pos.y,
     heading: ((-THREE.MathUtils.radToDeg(player.yaw)) % 360 + 360) % 360,
     speed: dt > 0 ? Math.hypot(player.pos.x - prevX, player.pos.z - prevZ) / dt : 0,

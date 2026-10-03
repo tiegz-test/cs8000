@@ -111,31 +111,116 @@ function makeScreenTexture() {
   return tex;
 }
 
+// Stenciled panel label lying flat on the deck face.
+function labelMesh(text, w, h, color = '#d3cc9a') {
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = Math.round(256 * h / w);
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = color;
+  ctx.font = `bold ${Math.round(cv.height * 0.72)}px "Courier New", monospace`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, cv.width / 2, cv.height / 2 + 2);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+  m.rotation.x = -Math.PI / 2;
+  return m;
+}
+
+function hazardTexture() {
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 32;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#c9a227'; ctx.fillRect(0, 0, 256, 32);
+  ctx.fillStyle = '#16140d';
+  for (let x = -32; x < 288; x += 32) {
+    ctx.beginPath(); ctx.moveTo(x, 32); ctx.lineTo(x + 16, 32); ctx.lineTo(x + 32, 0); ctx.lineTo(x + 16, 0); ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Knob face with tick marks around the rim.
+function knobTexture() {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 128;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#1b1d18'; ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = '#d3cc9a'; ctx.lineWidth = 3;
+  for (let i = 0; i <= 10; i++) {
+    const a = -Math.PI * 0.75 + (i / 10) * Math.PI * 1.5 - Math.PI / 2;
+    ctx.beginPath();
+    ctx.moveTo(64 + Math.cos(a) * 50, 64 + Math.sin(a) * 50);
+    ctx.lineTo(64 + Math.cos(a) * 60, 64 + Math.sin(a) * 60);
+    ctx.stroke();
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 function makeDeck() {
   const deck = new THREE.Group();
-  const metal = new THREE.MeshStandardMaterial({ color: 0x2a2e33, metalness: 0.7, roughness: 0.45 });
-  const trim = new THREE.MeshStandardMaterial({ color: 0x8a6a2a, metalness: 0.8, roughness: 0.35 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x111316, metalness: 0.4, roughness: 0.7 });
+  const drab = new THREE.MeshStandardMaterial({ color: 0x383d2f, metalness: 0.45, roughness: 0.65 });   // olive-drab panel
+  const plateMat = new THREE.MeshStandardMaterial({ color: 0x23271e, metalness: 0.3, roughness: 0.8 });  // recessed plates
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0x5a5f48, metalness: 0.6, roughness: 0.5 });
+  const rubber = new THREE.MeshStandardMaterial({ color: 0x15170f, metalness: 0.1, roughness: 0.85 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0x8c9096, metalness: 0.9, roughness: 0.35 });
+  const brass = new THREE.MeshStandardMaterial({ color: 0x8a6a2a, metalness: 0.8, roughness: 0.35 });
+  const guardMat = new THREE.MeshStandardMaterial({ color: 0xa31b14, metalness: 0.2, roughness: 0.5 });
 
-  // Base console: the body drops below the view, the top face tilts toward the pilot.
-  const body = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.5, 0.36), metal);
+  // Console body; the top face tilts toward the pilot.
+  const body = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.5, 0.36), drab);
   body.position.set(0, -0.25, -0.18);
   deck.add(body);
-
-  const top = new THREE.Group();          // everything mounted on the tilted face
-  top.position.set(0, 0, 0);
+  const top = new THREE.Group();
   top.rotation.x = 0.55;
   deck.add(top);
-  const face = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.02, 0.36), metal);
+  const face = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.02, 0.36), drab);
   face.position.set(0, 0, -0.18);
   top.add(face);
-  const lip = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.025, 0.02), trim);
-  lip.position.set(0, 0.01, -0.005);
+  const lip = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.022, 0.016), rimMat);
+  lip.position.set(0, 0.01, -0.004);
   top.add(lip);
+  const hazard = new THREE.Mesh(new THREE.PlaneGeometry(DECK_WIDTH - 0.04, 0.012),
+    new THREE.MeshBasicMaterial({ map: hazardTexture() }));
+  hazard.rotation.x = -Math.PI / 2;
+  hazard.position.set(0, 0.0215, -0.03);
+  top.add(hazard);
 
-  // center screen in a bezel
+  const leds = [];     // { mat, color, set(t, info) -> 0..1 }
+  const led = (x, z, color, fn, size = 0.007) => {
+    const mat = new THREE.MeshStandardMaterial({ color: 0x1a1a14, emissive: color, emissiveIntensity: 0, roughness: 0.4 });
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(size, size, 0.006, 14), mat);
+    m.position.set(x, 0.018, z);
+    top.add(m);
+    leds.push({ mat, fn });
+    return m;
+  };
+  const screw = (x, z) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.004, 8), steel);
+    m.position.set(x, 0.024, z);
+    top.add(m);
+  };
+  const plate = (cx, cz, w, d, title) => {
+    const rim = new THREE.Mesh(new THREE.BoxGeometry(w + 0.01, 0.008, d + 0.01), rimMat);
+    rim.position.set(cx, 0.012, cz);
+    top.add(rim);
+    const pl = new THREE.Mesh(new THREE.BoxGeometry(w, 0.01, d), plateMat);
+    pl.position.set(cx, 0.014, cz);
+    top.add(pl);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) screw(cx + sx * (w / 2 - 0.007), cz + sz * (d / 2 - 0.007));
+    const lab = labelMesh(title, 0.1, 0.02);
+    lab.position.set(cx, 0.0195, cz - d / 2 + 0.017);
+    top.add(lab);
+  };
+
+  // --- center screen ---
   const screenTex = makeScreenTexture();
-  const bezel = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.012, 0.24), dark);
+  const bezel = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.012, 0.24), rubber);
   bezel.position.set(0, 0.016, -0.19);
   top.add(bezel);
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.37, 0.21),
@@ -144,65 +229,119 @@ function makeDeck() {
   screen.position.set(0, 0.023, -0.19);
   top.add(screen);
 
-  // button banks on each side
-  const blinkers = [];
-  const colors = [0xff3322, 0xffaa22, 0x33ff77, 0x33aaff];
-  const btnGeo = new THREE.CylinderGeometry(0.014, 0.016, 0.014, 20);
+  // --- left cluster: WEAPONS (keycaps, guarded switches) ---
+  const LX = -0.31, RX = 0.31, CZ = -0.17;
+  plate(LX, CZ, 0.17, 0.26, 'WPN SYS');
+  for (const [i, kx] of [-0.035, 0.035].entries()) {
+    for (const [j, kz] of [-0.065, -0.005].entries()) {
+      const cap = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.014, 0.036), rubber);
+      cap.position.set(LX + kx, 0.025, CZ + kz + 0.02);
+      top.add(cap);
+      const states = [(t) => 1, (t, info) => (info.edge ? 0.5 + 0.5 * Math.sin(t * 8) : 0), () => 0.0, (t, info) => (info.speed > 10 ? 1 : 0)];
+      led(LX + kx, CZ + kz - 0.007, [0x33dd66, 0xff3b2a, 0xffb02e, 0xffb02e][i * 2 + j], states[i * 2 + j], 0.005);
+    }
+  }
+  const guards = [];
+  for (const gx of [-0.04, 0.04]) {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.012, 0.03), rubber);
+    base.position.set(LX + gx, 0.02, CZ + 0.095);
+    top.add(base);
+    const tog = new THREE.Mesh(new THREE.CylinderGeometry(0.003, 0.004, 0.028, 8), steel);
+    tog.position.set(LX + gx, 0.034, CZ + 0.095);
+    top.add(tog);
+    const cover = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.002, 0.026), guardMat);
+    cover.geometry.translate(0, 0.001, -0.013);                      // hinge at the far edge
+    cover.position.set(LX + gx, 0.041, CZ + 0.108);
+    cover.rotation.x = gx < 0 ? 0 : -1.25;                            // one closed, one flipped up
+    top.add(cover);
+    guards.push(cover);
+  }
+
+  // --- right cluster: POWER (rotary knobs, rockers, level bar) ---
+  plate(RX, CZ, 0.17, 0.26, 'PWR / DRV');
+  const knobTex = knobTexture();
+  const knobs = [];
+  for (const kx of [-0.04, 0.04]) {
+    const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.021, 0.018, 24), rubber);
+    knob.position.set(RX + kx, 0.027, CZ - 0.05);
+    top.add(knob);
+    const ticks = new THREE.Mesh(new THREE.CircleGeometry(0.03, 28), new THREE.MeshBasicMaterial({ map: knobTex, transparent: true }));
+    ticks.rotation.x = -Math.PI / 2;
+    ticks.position.set(RX + kx, 0.0195, CZ - 0.05);
+    top.add(ticks);
+    const pointer = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.002, 0.016), new THREE.MeshBasicMaterial({ color: 0xe8e2b4 }));
+    pointer.geometry.translate(0, 0, -0.008);
+    pointer.position.set(RX + kx, 0.037, CZ - 0.05);
+    pointer.rotation.y = kx < 0 ? 0.6 : -0.4;
+    top.add(pointer);
+    knobs.push(pointer);
+  }
+  for (const rx of [-0.05, 0, 0.05]) {
+    const base = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.008, 0.034), rubber);
+    base.position.set(RX + rx, 0.02, CZ + 0.025);
+    top.add(base);
+    const rocker = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.01, 0.022), plateMat);
+    rocker.position.set(RX + rx, 0.027, CZ + 0.025);
+    rocker.rotation.x = rx === 0 ? 0.35 : -0.35;
+    top.add(rocker);
+    led(RX + rx, CZ + 0.052, rx === 0.05 ? 0xffb02e : 0x33dd66, () => 1, 0.004);
+  }
+  // level bar: 8 segments, fills with speed, last two amber then red
+  const barCols = [0x33dd66, 0x33dd66, 0x33dd66, 0x33dd66, 0x33dd66, 0xffb02e, 0xffb02e, 0xff3b2a];
+  barCols.forEach((c, i) => led(RX - 0.0595 + i * 0.017, CZ + 0.095, c, (t, info) => (info.speed / 14 * 8 > i + 0.2 ? 1 : 0), 0.0055));
+
+  // --- throttle and stick, in black rubber ---
   for (const side of [-1, 1]) {
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < 4; col++) {
-        const c = colors[(row + col + (side > 0 ? 1 : 0)) % colors.length];
-        const mat = new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.6, roughness: 0.3 });
-        const b = new THREE.Mesh(btnGeo, mat);
-        b.position.set(side * (0.27 + col * 0.04), 0.016, -0.1 - row * 0.05);
-        top.add(b);
-        blinkers.push({ mat, rate: 0.6 + ((row * 7 + col * 3 + (side > 0 ? 5 : 0)) % 9) * 0.35, phase: row + col * 1.7 });
-      }
-    }
-    // toggle switches
-    for (let i = 0; i < 4; i++) {
-      const base = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.01, 0.03), dark);
-      base.position.set(side * (0.275 + i * 0.04), 0.014, -0.27);
-      top.add(base);
-      const lever = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.005, 0.035, 8), trim);
-      lever.position.set(side * (0.275 + i * 0.04), 0.03, -0.27);
-      lever.rotation.x = i % 2 ? 0.5 : -0.5;
-      top.add(lever);
-    }
-    // throttle lever
-    const slot = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.008, 0.16), dark);
-    slot.position.set(side * 0.43, 0.014, -0.19);
+    const slot = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.008, 0.16), rubber);
+    slot.position.set(side * 0.44, 0.014, -0.19);
     top.add(slot);
-    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.09, 10), metal);
-    stick.position.set(side * 0.43, 0.06, -0.16);
+    const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.09, 10), steel);
+    stick.position.set(side * 0.44, 0.06, -0.16);
     stick.rotation.x = -0.35;
     top.add(stick);
-    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 12),
-      new THREE.MeshStandardMaterial({ color: side < 0 ? 0xcc2211 : 0x222222, roughness: 0.4 }));
-    knob.position.set(side * 0.43, 0.1, -0.145);
-    top.add(knob);
+    const grip = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 12), rubber);
+    grip.scale.y = 1.25;
+    grip.position.set(side * 0.44, 0.1, -0.145);
+    top.add(grip);
+    const stripe = new THREE.Mesh(new THREE.TorusGeometry(0.0195, 0.003, 8, 20), brass);
+    stripe.rotation.x = Math.PI / 2;
+    stripe.position.set(side * 0.44, 0.094, -0.147);
+    top.add(stripe);
   }
 
-  // dial gauges flanking the screen
+  // --- gauges flanking the screen (kept, restyled) ---
+  const needles = [];
   for (const side of [-1, 1]) {
-    const dial = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.01, 28), dark);
-    dial.position.set(side * 0.2 - side * 0.0, 0.016, -0.335);
-    dial.position.x = side * 0.245;
+    const x = side * 0.245;
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.037, 0.037, 0.01, 28), steel);
+    ring.position.set(x, 0.016, -0.335);
+    top.add(ring);
+    const dial = new THREE.Mesh(new THREE.CircleGeometry(0.031, 28), new THREE.MeshBasicMaterial({ color: 0x14180f }));
+    dial.rotation.x = -Math.PI / 2;
+    dial.position.set(x, 0.0225, -0.335);
     top.add(dial);
-    const face = new THREE.Mesh(new THREE.CircleGeometry(0.03, 28),
-      new THREE.MeshBasicMaterial({ color: 0x1c2a22 }));
-    face.rotation.x = -Math.PI / 2;
-    face.position.set(dial.position.x, 0.022, -0.335);
-    top.add(face);
-    const needle = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.002, 0.026),
-      new THREE.MeshBasicMaterial({ color: 0xffaa33 }));
+    const tickRing = new THREE.Mesh(new THREE.CircleGeometry(0.031, 28), new THREE.MeshBasicMaterial({ map: knobTex, transparent: true }));
+    tickRing.rotation.x = -Math.PI / 2;
+    tickRing.position.set(x, 0.023, -0.335);
+    top.add(tickRing);
+    const needle = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.002, 0.026), new THREE.MeshBasicMaterial({ color: 0xff9a2e }));
     needle.geometry.translate(0, 0, -0.013);
-    needle.position.set(dial.position.x, 0.024, -0.335);
+    needle.position.set(x, 0.0245, -0.335);
     top.add(needle);
-    blinkers.push({ needle, side });
+    needles.push({ needle, side });
   }
 
-  deck.userData = { blinkers, screenTex };
+  // master caution lights above the screen
+  led(-0.07, -0.325, 0xffb02e, (t, info) => (info.speed > 10 ? 1 : 0.0), 0.008);
+  led(0.07, -0.325, 0xff3b2a, (t, info) => (info.edge ? 0.5 + 0.5 * Math.sin(t * 8) : 0), 0.008);
+
+  const update = (t, info) => {
+    for (const l of leds) l.mat.emissiveIntensity = l.fn(t, info) * 1.4;
+    for (const n of needles) n.needle.rotation.y = n.side * 0.6 + Math.sin(t * 1.3 + n.side) * 0.25 + info.speed * 0.05;
+    knobs[0].rotation.y = 0.6 + Math.sin(t * 0.4) * 0.05;
+    knobs[1].rotation.y = -0.4 + Math.min(info.speed / 14, 1) * 1.6;
+  };
+  deck.userData = { screenTex, update };
   return deck;
 }
 
@@ -277,10 +416,7 @@ export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize
     glass.material.uniforms.uViewToWorld.value.setFromMatrix4(rot4.makeRotationFromQuaternion(info.camQuat));
     tmp.t += dt;
     const t = tmp.t;
-    for (const b of deck.userData.blinkers) {
-      if (b.mat) b.mat.emissiveIntensity = 0.25 + 0.75 * (0.5 + 0.5 * Math.sin(t * b.rate * 3 + b.phase)) ** 3;
-      if (b.needle) b.needle.rotation.y = b.side * 0.6 + Math.sin(t * 1.3 + b.side) * 0.25 + info.speed * 0.05;
-    }
+    deck.userData.update(t, info);
     if (t - tmp.lastScreen > 0.08) {
       tmp.lastScreen = t;
       deck.userData.screenTex.userData.draw(t, info);
