@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
 import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
+import { makeCockpit } from './cockpit.js';
 import { BUILD } from './version.js';
 import { makeGrassTexture, breakUpTiling } from './grass.js';
 
@@ -9,6 +10,7 @@ const SIZE = 600, SEGS = 220, EYE = 1.7;
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 document.body.prepend(renderer.domElement);
+renderer.autoClear = false; // world pass, then cockpit pass on top
 
 const scene = new THREE.Scene();
 scene.background = HORIZON.clone();
@@ -25,6 +27,7 @@ const skyDome = makeSkyDome(SUN_DIR);
 scene.add(skyDome);
 const clouds = makeClouds();
 scene.add(clouds);
+const cockpit = makeCockpit();
 
 let terrain, heightAt;
 const grass = makeGrassTexture();
@@ -142,6 +145,7 @@ function resize() {
   renderer.setSize(innerWidth, innerHeight, false);
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
+  cockpit.resize(camera.aspect);
 }
 addEventListener('resize', resize);
 resize();
@@ -156,6 +160,7 @@ function tick() {
   const len = Math.hypot(fx, sx);
   if (len > 1) { fx /= len; sx /= len; }
   const speed = (keys.ShiftLeft || keys.ShiftRight ? 14 : 7) * dt;
+  const prevX = player.pos.x, prevZ = player.pos.z;
   const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
   player.pos.x = Math.max(-half, Math.min(half, player.pos.x + (-sin * fx + cos * sx) * speed));
   player.pos.z = Math.max(-half, Math.min(half, player.pos.z + (-cos * fx - sin * sx) * speed));
@@ -167,7 +172,15 @@ function tick() {
   clouds.userData.update(dt, player.pos);
   camera.position.copy(player.pos);
   camera.rotation.set(player.pitch, player.yaw, 0);
+  renderer.clear();
   renderer.render(scene, camera);
+  cockpit.update(dt, {
+    alt: player.pos.y,
+    heading: ((-THREE.MathUtils.radToDeg(player.yaw)) % 360 + 360) % 360,
+    speed: dt > 0 ? Math.hypot(player.pos.x - prevX, player.pos.z - prevZ) / dt : 0,
+  });
+  renderer.clearDepth();
+  renderer.render(cockpit.scene, cockpit.camera);
   hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}`;
   requestAnimationFrame(tick);
 }
