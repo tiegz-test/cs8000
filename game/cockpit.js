@@ -75,40 +75,115 @@ function onGlass(center, yaw, pitch, r = GLASS_RADIUS * 0.99) {
   );
 }
 
+const SCREEN_W = 512, SCREEN_H = 305;
+
 function makeScreenTexture() {
   const cv = document.createElement('canvas');
-  cv.width = 352; cv.height = 200;
+  cv.width = SCREEN_W; cv.height = SCREEN_H;
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
   const ctx = cv.getContext('2d');
+  let prevSweep = 0;
+  const TAU = Math.PI * 2;
+  const mod = (v) => ((v % TAU) + TAU) % TAU;
+
   tex.userData.draw = (t, info) => {
     ctx.fillStyle = '#04140a';
-    ctx.fillRect(0, 0, 352, 200);
-    // radar
-    const cx = 100, cy = 100, r = 90;
-    ctx.strokeStyle = 'rgba(80,255,140,.5)';
+    ctx.fillRect(0, 0, SCREEN_W, SCREEN_H);
+
+    // ---- radar (heading-up: forward is the top of the scope) ----
+    const cx = 152, cy = 152, R = 140;
+    const range = info.radarRange, tg = info.target;
     ctx.lineWidth = 1.5;
-    for (const k of [1, 0.66, 0.33]) { ctx.beginPath(); ctx.arc(cx, cy, r * k, 0, Math.PI * 2); ctx.stroke(); }
-    ctx.beginPath(); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); ctx.stroke();
-    const a = t * 2.2;
-    const g = ctx.createConicGradient ? ctx.createConicGradient(a - 0.9, cx, cy) : null;
-    if (g) {
-      g.addColorStop(0, 'rgba(80,255,140,0)');
-      g.addColorStop(0.14, 'rgba(80,255,140,.55)');
-      g.addColorStop(0.15, 'rgba(80,255,140,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(80,255,140,.45)';
+    for (const k of [1, 0.75, 0.5, 0.25]) { ctx.beginPath(); ctx.arc(cx, cy, R * k, 0, TAU); ctx.stroke(); }
+    ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
+    // range labels along the upper-right spoke
+    ctx.fillStyle = 'rgba(125,255,170,.7)';
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'left';
+    for (const k of [0.5, 1]) ctx.fillText(`${Math.round(range * k)}m`, cx + 4, cy - R * k + 14);
+    // north marker rotates opposite to heading
+    const nAng = -info.heading * Math.PI / 180;
+    ctx.fillStyle = '#7dffaa';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('N', cx + Math.sin(nAng) * (R - 12), cy - Math.cos(nAng) * (R - 12) + 5);
+    // player marker
+    ctx.fillStyle = '#7dffaa';
+    ctx.beginPath(); ctx.moveTo(cx, cy - 7); ctx.lineTo(cx + 5, cy + 5); ctx.lineTo(cx - 5, cy + 5); ctx.closePath(); ctx.fill();
+
+    // sweep
+    const sweep = t * 2.2;                                   // canvas angle (0 = right, clockwise)
+    const cg = ctx.createConicGradient ? ctx.createConicGradient(sweep - 0.9, cx, cy) : null;
+    if (cg) {
+      cg.addColorStop(0, 'rgba(80,255,140,0)');
+      cg.addColorStop(0.14, 'rgba(80,255,140,.5)');
+      cg.addColorStop(0.15, 'rgba(80,255,140,0)');
+      ctx.fillStyle = cg;
+      ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.fill();
     }
     ctx.strokeStyle = '#7dffaa';
-    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r); ctx.stroke();
-    // readouts
+    ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(sweep) * R, cy + Math.sin(sweep) * R); ctx.stroke();
+
+    // ---- target blip ----
+    let status = 'SEARCHING';
+    if (tg) {
+      const inRange = tg.dist <= range;
+      const ang = tg.bearing - Math.PI / 2;                   // bearing (0 = ahead) -> canvas angle
+      const rr = inRange ? Math.max(8, R * tg.dist / range) : R - 7;   // out of range: parked on the rim
+      const bx = cx + Math.cos(ang) * rr, by = cy + Math.sin(ang) * rr;
+      const since = mod(sweep - ang);                         // radians since the sweep passed the blip
+      const glow = 0.12 + 0.88 * Math.exp(-since * 1.3);
+
+      // ping when the sweep crosses the blip
+      if (Math.floor((sweep - ang) / TAU) > Math.floor((prevSweep - ang) / TAU)) info.ping?.(inRange, tg.dist);
+
+      if (inRange) {
+        const g2 = ctx.createRadialGradient(bx, by, 0, bx, by, 26);
+        g2.addColorStop(0, `rgba(255,220,60,${0.8 * glow})`);
+        g2.addColorStop(1, 'rgba(255,200,0,0)');
+        ctx.fillStyle = g2;
+        ctx.beginPath(); ctx.arc(bx, by, 26, 0, TAU); ctx.fill();
+        ctx.fillStyle = `rgba(255,225,80,${0.35 + 0.65 * glow})`;
+        ctx.beginPath(); ctx.arc(bx, by, 6, 0, TAU); ctx.fill();
+        if (since < 1.2) {                                    // expanding ring right after the ping
+          ctx.strokeStyle = `rgba(255,220,60,${0.7 * (1 - since / 1.2)})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(bx, by, 6 + since * 18, 0, TAU); ctx.stroke();
+        }
+        status = `TGT ${String(Math.round(tg.dist)).padStart(3, ' ')}m`;
+      } else {
+        // faint, hollow marker with an outward chevron: "something is out there, that way"
+        ctx.strokeStyle = `rgba(255,220,60,${0.3 + 0.7 * glow})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(bx, by, 7, 0, TAU); ctx.stroke();
+        const ox = Math.cos(ang), oy = Math.sin(ang);
+        ctx.beginPath();
+        ctx.moveTo(bx + ox * 13 - oy * 5, by + oy * 13 + ox * 5);
+        ctx.lineTo(bx + ox * 19, by + oy * 19);
+        ctx.lineTo(bx + ox * 13 + oy * 5, by + oy * 13 - ox * 5);
+        ctx.stroke();
+        status = 'OUT OF RANGE';
+      }
+    }
+    prevSweep = sweep;
+
+    // ---- readouts ----
+    ctx.textAlign = 'left';
     ctx.fillStyle = '#7dffaa';
-    ctx.font = 'bold 18px monospace';
-    ctx.fillText(`ALT ${String(Math.round(info.alt)).padStart(4, ' ')}m`, 215, 55);
-    ctx.fillText(`HDG ${String(Math.round(info.heading)).padStart(3, '0')}`, 215, 90);
-    ctx.fillText(`SPD ${info.speed.toFixed(1)}`, 215, 125);
+    ctx.font = 'bold 19px monospace';
+    ctx.fillText(`ALT ${String(Math.round(info.alt)).padStart(4, ' ')}m`, 322, 40);
+    ctx.fillText(`HDG ${String(Math.round(info.heading)).padStart(3, '0')}`, 322, 72);
+    ctx.fillText(`SPD ${info.speed.toFixed(1)}`, 322, 104);
+    ctx.fillText(`RNG ${Math.round(range)}m`, 322, 136);
+    ctx.fillStyle = tg && tg.dist <= range ? '#ffd84a' : '#9a8a3a';
+    ctx.font = 'bold 17px monospace';
+    ctx.fillText(status, 322, 190);
     ctx.fillStyle = Math.floor(t * 2) % 2 ? '#ff5544' : '#662218';
-    ctx.fillText('SYS OK', 215, 165);
+    ctx.font = 'bold 19px monospace';
+    ctx.fillText('SYS OK', 322, 270);
     tex.needsUpdate = true;
   };
   return tex;
@@ -176,14 +251,14 @@ function makeDeck() {
   const guardMat = new THREE.MeshStandardMaterial({ color: 0xa31b14, metalness: 0.2, roughness: 0.5 });
 
   // Console body; the top face tilts toward the pilot.
-  const body = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.5, 0.36), drab);
-  body.position.set(0, -0.25, -0.18);
+  const body = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.5, 0.4), drab);
+  body.position.set(0, -0.25, -0.2);
   deck.add(body);
   const top = new THREE.Group();
   top.rotation.x = 0.55;
   deck.add(top);
-  const face = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.02, 0.36), drab);
-  face.position.set(0, 0, -0.18);
+  const face = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.02, 0.4), drab);
+  face.position.set(0, 0, -0.2);
   top.add(face);
   const lip = new THREE.Mesh(new THREE.BoxGeometry(DECK_WIDTH, 0.022, 0.016), rimMat);
   lip.position.set(0, 0.01, -0.004);
@@ -223,19 +298,19 @@ function makeDeck() {
 
   // --- center screen ---
   const screenTex = makeScreenTexture();
-  const bezel = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.012, 0.24), rubber);
-  bezel.position.set(0, 0.016, -0.19);
+  const bezel = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.012, 0.31), rubber);
+  bezel.position.set(0, 0.016, -0.2);
   top.add(bezel);
-  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.37, 0.21),
+  const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.47, 0.28),
     new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false }));
   screen.rotation.x = -Math.PI / 2;
-  screen.position.set(0, 0.023, -0.19);
+  screen.position.set(0, 0.023, -0.2);
   top.add(screen);
 
   // --- left cluster: WEAPONS (keycaps, guarded switches) ---
-  const LX = -0.31, RX = 0.31, CZ = -0.17;
-  plate(LX, CZ, 0.17, 0.26, 'WPN SYS');
-  for (const [i, kx] of [-0.035, 0.035].entries()) {
+  const LX = -0.345, RX = 0.345, CZ = -0.17;
+  plate(LX, CZ, 0.15, 0.26, 'WPN SYS');
+  for (const [i, kx] of [-0.03, 0.03].entries()) {
     for (const [j, kz] of [-0.065, -0.005].entries()) {
       const cap = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.014, 0.036), rubber);
       cap.position.set(LX + kx, 0.025, CZ + kz + 0.02);
@@ -245,7 +320,7 @@ function makeDeck() {
     }
   }
   const guards = [];
-  for (const gx of [-0.04, 0.04]) {
+  for (const gx of [-0.034, 0.034]) {
     const base = new THREE.Mesh(new THREE.BoxGeometry(0.034, 0.012, 0.03), rubber);
     base.position.set(LX + gx, 0.02, CZ + 0.095);
     top.add(base);
@@ -261,10 +336,10 @@ function makeDeck() {
   }
 
   // --- right cluster: POWER (rotary knobs, rockers, level bar) ---
-  plate(RX, CZ, 0.17, 0.26, 'PWR / DRV');
+  plate(RX, CZ, 0.15, 0.26, 'PWR / DRV');
   const knobTex = knobTexture();
   const knobs = [];
-  for (const kx of [-0.04, 0.04]) {
+  for (const kx of [-0.034, 0.034]) {
     const knob = new THREE.Mesh(new THREE.CylinderGeometry(0.019, 0.021, 0.018, 24), rubber);
     knob.position.set(RX + kx, 0.027, CZ - 0.05);
     top.add(knob);
@@ -279,7 +354,7 @@ function makeDeck() {
     top.add(pointer);
     knobs.push(pointer);
   }
-  for (const rx of [-0.05, 0, 0.05]) {
+  for (const rx of [-0.045, 0, 0.045]) {
     const base = new THREE.Mesh(new THREE.BoxGeometry(0.028, 0.008, 0.034), rubber);
     base.position.set(RX + rx, 0.02, CZ + 0.025);
     top.add(base);
@@ -287,56 +362,56 @@ function makeDeck() {
     rocker.position.set(RX + rx, 0.027, CZ + 0.025);
     rocker.rotation.x = rx === 0 ? 0.35 : -0.35;
     top.add(rocker);
-    led(RX + rx, CZ + 0.052, rx === 0.05 ? 0xffb02e : 0x33dd66, () => 1, 0.004);
+    led(RX + rx, CZ + 0.052, rx === 0.045 ? 0xffb02e : 0x33dd66, () => 1, 0.004);
   }
   // level bar: 8 segments, fills with speed, last two amber then red
   const barCols = [0x33dd66, 0x33dd66, 0x33dd66, 0x33dd66, 0x33dd66, 0xffb02e, 0xffb02e, 0xff3b2a];
-  barCols.forEach((c, i) => led(RX - 0.0595 + i * 0.017, CZ + 0.095, c, (t, info) => (info.speed / 14 * 8 > i + 0.2 ? 1 : 0), 0.0055));
+  barCols.forEach((c, i) => led(RX - 0.0542 + i * 0.0155, CZ + 0.095, c, (t, info) => (info.speed / 14 * 8 > i + 0.2 ? 1 : 0), 0.0055));
 
   // --- throttle and stick, in black rubber ---
   for (const side of [-1, 1]) {
     const slot = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.008, 0.16), rubber);
-    slot.position.set(side * 0.44, 0.014, -0.19);
+    slot.position.set(side * 0.468, 0.014, -0.19);
     top.add(slot);
     const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.007, 0.007, 0.09, 10), steel);
-    stick.position.set(side * 0.44, 0.06, -0.16);
+    stick.position.set(side * 0.468, 0.06, -0.16);
     stick.rotation.x = -0.35;
     top.add(stick);
     const grip = new THREE.Mesh(new THREE.SphereGeometry(0.02, 16, 12), rubber);
     grip.scale.y = 1.25;
-    grip.position.set(side * 0.44, 0.1, -0.145);
+    grip.position.set(side * 0.468, 0.1, -0.145);
     top.add(grip);
     const stripe = new THREE.Mesh(new THREE.TorusGeometry(0.0195, 0.003, 8, 20), brass);
     stripe.rotation.x = Math.PI / 2;
-    stripe.position.set(side * 0.44, 0.094, -0.147);
+    stripe.position.set(side * 0.468, 0.094, -0.147);
     top.add(stripe);
   }
 
   // --- gauges flanking the screen (kept, restyled) ---
   const needles = [];
   for (const side of [-1, 1]) {
-    const x = side * 0.245;
+    const x = side * 0.345;
     const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.037, 0.037, 0.01, 28), steel);
-    ring.position.set(x, 0.016, -0.335);
+    ring.position.set(x, 0.016, -0.355);
     top.add(ring);
     const dial = new THREE.Mesh(new THREE.CircleGeometry(0.031, 28), new THREE.MeshBasicMaterial({ color: 0x14180f }));
     dial.rotation.x = -Math.PI / 2;
-    dial.position.set(x, 0.0225, -0.335);
+    dial.position.set(x, 0.0225, -0.355);
     top.add(dial);
     const tickRing = new THREE.Mesh(new THREE.CircleGeometry(0.031, 28), new THREE.MeshBasicMaterial({ map: knobTex, transparent: true }));
     tickRing.rotation.x = -Math.PI / 2;
-    tickRing.position.set(x, 0.023, -0.335);
+    tickRing.position.set(x, 0.023, -0.355);
     top.add(tickRing);
     const needle = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.002, 0.026), new THREE.MeshBasicMaterial({ color: 0xff9a2e }));
     needle.geometry.translate(0, 0, -0.013);
-    needle.position.set(x, 0.0245, -0.335);
+    needle.position.set(x, 0.0245, -0.355);
     top.add(needle);
     needles.push({ needle, side });
   }
 
   // master caution lights above the screen
-  led(-0.07, -0.325, 0xffb02e, (t, info) => (info.speed > 10 ? 1 : 0.0), 0.008);
-  led(0.07, -0.325, 0xff3b2a, (t, info) => (info.edge ? 0.5 + 0.5 * Math.sin(t * 8) : 0), 0.008);
+  led(-0.07, -0.385, 0xffb02e, (t, info) => (info.speed > 10 ? 1 : 0.0), 0.008);
+  led(0.07, -0.385, 0xff3b2a, (t, info) => (info.edge ? 0.5 + 0.5 * Math.sin(t * 8) : 0), 0.008);
 
   const update = (t, info) => {
     for (const l of leds) l.mat.emissiveIntensity = l.fn(t, info) * 1.4;

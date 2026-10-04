@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
 import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
+import { makeOrb } from './orb.js';
+import { initAudio, beep } from './audio.js';
 import { makeRivers } from './rivers.js';
 import { makePines } from './trees.js';
 import { makeCockpit } from './cockpit.js';
@@ -31,7 +33,8 @@ const clouds = makeClouds();
 scene.add(clouds);
 const cockpit = makeCockpit(SUN_DIR);
 
-let terrain, heightAt, trees, rivers;
+let terrain, heightAt, trees, rivers, orb;
+const RADAR_RANGE = 150;                    // meters; beyond this the blip sits on the rim
 const grass = makeGrassTexture();
 grass.repeat.set(64, 64); // ~9m tiles: big enough to read on a phone
 renderer.capabilities && (grass.anisotropy = renderer.capabilities.getMaxAnisotropy());
@@ -80,6 +83,11 @@ function buildTerrain(seed) {
   if (trees) { scene.remove(trees.group); trees.dispose(); }
   trees = makePines({ heightAt, maxH, seed, size: SIZE, avoid: { x: sx, z: sz }, exclude: (x, z) => rivers.distance(x, z) < 11 });
   scene.add(trees.group);
+
+  // the rescue beacon, about halfway across the map from where we start
+  if (orb) { scene.remove(orb.group); orb.dispose(); }
+  orb = makeOrb({ from: { x: sx, z: sz }, heightAt, riverDistance: rivers.distance, size: SIZE, seed, distance: 300 });
+  scene.add(orb.group);
 }
 
 const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0 };
@@ -144,7 +152,7 @@ addEventListener('touchcancel', touchEnd);
 
 // --- start overlay / new map ---
 const startEl = document.getElementById('start');
-startEl.addEventListener('click', () => { startEl.style.display = 'none'; });
+startEl.addEventListener('click', () => { startEl.style.display = 'none'; initAudio(); });
 if (location.hash === '#go') startEl.style.display = 'none';
 let seed = Number(new URLSearchParams(location.search).get('seed')) || Math.floor(Math.random() * 1e6);
 document.getElementById('new').addEventListener('click', (e) => {
@@ -184,13 +192,20 @@ function tick() {
 
   trees.update(player.pos);
   rivers.update(dt);
+  orb.update(clock.elapsedTime);
   skyDome.position.copy(player.pos);
   clouds.userData.update(dt, player.pos);
   camera.position.copy(player.pos);
   camera.rotation.set(player.pitch, player.yaw, 0);
   renderer.clear();
   renderer.render(scene, camera);
+  const odx = orb.x - player.pos.x, odz = orb.z - player.pos.z;
+  const fwd = odx * -Math.sin(player.yaw) + odz * -Math.cos(player.yaw);
+  const rgt = odx * Math.cos(player.yaw) + odz * -Math.sin(player.yaw);
   cockpit.update(dt, {
+    radarRange: RADAR_RANGE,
+    target: { dist: Math.hypot(odx, odz), bearing: Math.atan2(rgt, fwd) },
+    ping: (inRange, dist) => beep(inRange ? 700 + 700 * (1 - dist / RADAR_RANGE) : 480, inRange ? 0.07 : 0.035),
     camQuat: camera.quaternion,
     edge: Math.max(Math.abs(player.pos.x), Math.abs(player.pos.z)) > half - 15,
     alt: player.pos.y,
