@@ -53,7 +53,7 @@ function noiseFn(rand) {
   };
 }
 
-export function makePines({ heightAt, maxH, seed, size, avoid, candidates = 8500 }) {
+export function makePines({ heightAt, maxH, seed, size, avoid, exclude, candidates = 8500 }) {
   const rand = mulberry32(seed * 7 + 99);
   const forest = noiseFn(mulberry32(seed * 13 + 5));
   const half = size / 2 - 8;
@@ -62,6 +62,7 @@ export function makePines({ heightAt, maxH, seed, size, avoid, candidates = 8500
   for (let i = 0; i < candidates; i++) {
     const x = (rand() * 2 - 1) * half, z = (rand() * 2 - 1) * half;
     if (avoid && Math.hypot(x - avoid.x, z - avoid.z) < 12) continue;
+    if (exclude && exclude(x, z)) continue;
     const y = heightAt(x, z);
     const alt = y / maxH;
     if (alt > 0.5) continue;                                     // thin out toward the peaks
