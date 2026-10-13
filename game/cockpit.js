@@ -410,7 +410,7 @@ function makeDeck() {
   }
 
   // master caution lights above the screen
-  led(-0.07, -0.385, 0xffb02e, (t, info) => (info.speed > 10 ? 1 : 0.0), 0.008);
+  led(-0.07, -0.385, 0xffb02e, (t, info) => (info.speed > 10 || info.thrust ? 1 : 0.0), 0.008);   // amber: running or booster burning
   led(0.07, -0.385, 0xff3b2a, (t, info) => (info.edge ? 0.5 + 0.5 * Math.sin(t * 8) : 0), 0.008);
 
   const update = (t, info) => {

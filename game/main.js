@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
 import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
-import { stepVertical } from './physics.js';
+import { stepVertical, THRUST_DELAY } from './physics.js';
 import { makeOrb } from './orb.js';
-import { initAudio, beep } from './audio.js';
+import { initAudio, beep, setThruster } from './audio.js';
 import { makeRivers } from './rivers.js';
 import { makePines } from './trees.js';
 import { makeCockpit } from './cockpit.js';
@@ -80,7 +80,7 @@ function buildTerrain(seed) {
   player.pos.set(sx, heightAt(sx, sz) + EYE, sz);
   player.yaw = Math.atan2(-(px - sx), -(pz - sz));
   player.pitch = 0.12;
-  player.vy = 0; player.vx = 0; player.vz = 0; player.grounded = true;
+  player.vy = 0; player.vx = 0; player.vz = 0; player.grounded = true; player.thrusting = false; player.hold = 0;
 
   if (trees) { scene.remove(trees.group); trees.dispose(); }
   trees = makePines({ heightAt, maxH, seed, size: SIZE, avoid: { x: sx, z: sz }, exclude: (x, z) => rivers.distance(x, z) < 11 });
@@ -92,7 +92,8 @@ function buildTerrain(seed) {
   scene.add(orb.group);
 }
 
-const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, vy: 0, grounded: true, vx: 0, vz: 0 };
+const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, vy: 0, grounded: true, vx: 0, vz: 0, thrusting: false, hold: 0, capY: 0 };
+let touchJumpHeld = false;                // JUMP button currently pressed
 let jumpBuffer = 0;                       // seconds a jump press stays queued (forgives early presses)
 const keys = {};
 const stick = { x: 0, y: 0 };
@@ -163,8 +164,10 @@ if (location.hash === '#go') startEl.style.display = 'none';
 let seed = Number(new URLSearchParams(location.search).get('seed')) || Math.floor(Math.random() * 1e6);
 const jumpBtn = document.getElementById('jump');
 if (touchUI) jumpBtn.style.display = 'block';
-jumpBtn.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); jumpBuffer = 0.12; }, { passive: false });
-jumpBtn.addEventListener('click', () => { jumpBuffer = 0.12; });
+jumpBtn.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); jumpBuffer = 0.12; touchJumpHeld = true; }, { passive: false });
+const releaseJump = (e) => { e.stopPropagation(); touchJumpHeld = false; };
+jumpBtn.addEventListener('touchend', releaseJump);
+jumpBtn.addEventListener('touchcancel', releaseJump);
 document.getElementById('new').addEventListener('click', (e) => {
   e.stopPropagation();
   seed = Math.floor(Math.random() * 1e6);
@@ -205,9 +208,12 @@ function tick() {
 
   // vertical motion: glide over the ground, or follow real jump/fall physics
   jumpBuffer = Math.max(0, jumpBuffer - dt);
-  const body = { y: player.pos.y, vy: player.vy, grounded: player.grounded };
-  if (stepVertical(body, heightAt(player.pos.x, player.pos.z) + EYE, dt, jumpBuffer > 0 && player.grounded)) jumpBuffer = 0;
+  const body = { y: player.pos.y, vy: player.vy, grounded: player.grounded, thrusting: player.thrusting, hold: player.hold, capY: player.capY };
+  const jumpHeld = !!keys.Space || touchJumpHeld;
+  if (stepVertical(body, heightAt(player.pos.x, player.pos.z) + EYE, dt, jumpBuffer > 0 && player.grounded, jumpHeld)) jumpBuffer = 0;
   player.pos.y = body.y; player.vy = body.vy; player.grounded = body.grounded;
+  player.thrusting = body.thrusting; player.hold = body.hold; player.capY = body.capY;
+  setThruster(player.thrusting);               // booster roar: a puff on a tap, a long burn while held
 
   trees.update(player.pos);
   rivers.update(dt);
@@ -226,6 +232,7 @@ function tick() {
     target: { dist: Math.hypot(odx, odz), bearing: Math.atan2(rgt, fwd) },
     ping: (inRange, dist) => beep(inRange ? 700 + 700 * (1 - dist / RADAR_RANGE) : 480, inRange ? 0.07 : 0.035),
     camQuat: camera.quaternion,
+    thrust: player.thrusting && player.hold >= THRUST_DELAY,
     edge: Math.max(Math.abs(player.pos.x), Math.abs(player.pos.z)) > half - 15,
     alt: player.pos.y,
     heading: ((-THREE.MathUtils.radToDeg(player.yaw)) % 360 + 360) % 360,
