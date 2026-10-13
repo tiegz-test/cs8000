@@ -22,6 +22,9 @@
     #hud { position: fixed; top: 8px; left: 10px; color: #fff; font-size: 12px; text-shadow: 0 1px 2px #000; pointer-events: none; }
     #cross { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%;
       background: rgba(255,255,255,.7); pointer-events: none; }
+    #jump { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(24px, env(safe-area-inset-bottom)) + 8px); display: none;
+      width: 76px; height: 76px; border-radius: 50%; border: 2px solid rgba(255,255,255,.6); background: rgba(255,255,255,.18);
+      color: #fff; font: bold 13px system-ui, sans-serif; touch-action: none; -webkit-tap-highlight-color: transparent; z-index: 2; }
     #new { position: fixed; top: 8px; right: 10px; padding: 6px 10px; border-radius: 8px; border: 0;
       background: rgba(0,0,0,.4); color: #fff; font-size: 13px; }
   </style>
@@ -37,6 +40,7 @@
   <div id="cross"></div>
   <div id="hud"></div>
   <button id="new">New map</button>
+  <button id="jump">JUMP</button>
   <script type="module" src="./main.js"></script>
 </body>
 </html>

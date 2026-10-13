@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
 import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
+import { stepVertical } from './physics.js';
 import { makeOrb } from './orb.js';
 import { initAudio, beep } from './audio.js';
 import { makeRivers } from './rivers.js';
@@ -79,6 +80,7 @@ function buildTerrain(seed) {
   player.pos.set(sx, heightAt(sx, sz) + EYE, sz);
   player.yaw = Math.atan2(-(px - sx), -(pz - sz));
   player.pitch = 0.12;
+  player.vy = 0; player.vx = 0; player.vz = 0; player.grounded = true;
 
   if (trees) { scene.remove(trees.group); trees.dispose(); }
   trees = makePines({ heightAt, maxH, seed, size: SIZE, avoid: { x: sx, z: sz }, exclude: (x, z) => rivers.distance(x, z) < 11 });
@@ -90,12 +92,16 @@ function buildTerrain(seed) {
   scene.add(orb.group);
 }
 
-const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0 };
+const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, vy: 0, grounded: true, vx: 0, vz: 0 };
+let jumpBuffer = 0;                       // seconds a jump press stays queued (forgives early presses)
 const keys = {};
 const stick = { x: 0, y: 0 };
 
 // --- input: keyboard / mouse ---
-addEventListener('keydown', (e) => { keys[e.code] = true; });
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) jumpBuffer = 0.12; }
+});
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 const canvas = renderer.domElement;
 function look(dx, dy, k) {
@@ -155,6 +161,10 @@ const startEl = document.getElementById('start');
 startEl.addEventListener('click', () => { startEl.style.display = 'none'; initAudio(); });
 if (location.hash === '#go') startEl.style.display = 'none';
 let seed = Number(new URLSearchParams(location.search).get('seed')) || Math.floor(Math.random() * 1e6);
+const jumpBtn = document.getElementById('jump');
+if (touchUI) jumpBtn.style.display = 'block';
+jumpBtn.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); jumpBuffer = 0.12; }, { passive: false });
+jumpBtn.addEventListener('click', () => { jumpBuffer = 0.12; });
 document.getElementById('new').addEventListener('click', (e) => {
   e.stopPropagation();
   seed = Math.floor(Math.random() * 1e6);
@@ -181,14 +191,23 @@ function tick() {
   let sx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + stick.x;
   const len = Math.hypot(fx, sx);
   if (len > 1) { fx /= len; sx /= len; }
-  const speed = (keys.ShiftLeft || keys.ShiftRight ? 14 : 7) * dt;
+  const speed = keys.ShiftLeft || keys.ShiftRight ? 14 : 7;
   const prevX = player.pos.x, prevZ = player.pos.z;
   const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
-  player.pos.x = Math.max(-half, Math.min(half, player.pos.x + (-sin * fx + cos * sx) * speed));
-  player.pos.z = Math.max(-half, Math.min(half, player.pos.z + (-cos * fx - sin * sx) * speed));
-  // follow the ground smoothly
-  const target = heightAt(player.pos.x, player.pos.z) + EYE;
-  player.pos.y += (target - player.pos.y) * Math.min(1, dt * 12);
+  const wantX = (-sin * fx + cos * sx) * speed, wantZ = (-cos * fx - sin * sx) * speed;
+  if (player.grounded) { player.vx = wantX; player.vz = wantZ; }
+  else {                                   // in the air you keep your momentum, with a little steering
+    const k = Math.min(1, dt * 1.2);
+    player.vx += (wantX - player.vx) * k; player.vz += (wantZ - player.vz) * k;
+  }
+  player.pos.x = Math.max(-half, Math.min(half, player.pos.x + player.vx * dt));
+  player.pos.z = Math.max(-half, Math.min(half, player.pos.z + player.vz * dt));
+
+  // vertical motion: glide over the ground, or follow real jump/fall physics
+  jumpBuffer = Math.max(0, jumpBuffer - dt);
+  const body = { y: player.pos.y, vy: player.vy, grounded: player.grounded };
+  if (stepVertical(body, heightAt(player.pos.x, player.pos.z) + EYE, dt, jumpBuffer > 0 && player.grounded)) jumpBuffer = 0;
+  player.pos.y = body.y; player.vy = body.vy; player.grounded = body.grounded;
 
   trees.update(player.pos);
   rivers.update(dt);
