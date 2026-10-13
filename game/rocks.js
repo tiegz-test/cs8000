@@ -83,6 +83,8 @@ export function makeRocks({ heightAt, maxH, seed, size, avoid = [], exclude, can
 
   return {
     group, count: rocks.length,
+    // dome colliders matching the visible rock: horizontal radius, dome base height and dome height
+    colliders: rocks.map((r) => ({ x: r.x, z: r.z, r: r.s * Math.max(r.sx, r.sz) * 0.95, cy: r.y + r.s * r.sy * 0.18, h: r.s * r.sy * 0.7 })),
     biggest: rocks.reduce((mx, r) => Math.max(mx, r.s), 0),
     dispose() { geos.forEach((g) => g.dispose()); mat.dispose(); meshes.forEach((x) => x.dispose()); },
   };

@@ -82,6 +82,7 @@ export function makePines({ heightAt, maxH, seed, size, avoid, exclude, candidat
   const chunks = [];
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), p = new THREE.Vector3(), col = new THREE.Color();
   let total = 0;
+  const colliders = [];     // trunk cylinders (with a margin to keep the camera out of the branches)
 
   buckets.forEach((trees, idx) => {
     if (!trees.length) return;
@@ -99,6 +100,7 @@ export function makePines({ heightAt, maxH, seed, size, avoid, exclude, candidat
     });
     for (const mesh of [near, far]) { mesh.instanceMatrix.needsUpdate = true; mesh.instanceColor.needsUpdate = true; mesh.computeBoundingSphere(); group.add(mesh); }
     const cx = ((idx % CHUNKS) + 0.5) / CHUNKS * size - size / 2, cz = (Math.floor(idx / CHUNKS) + 0.5) / CHUNKS * size - size / 2;
+    for (const t of trees) colliders.push({ x: t.x, z: t.z, r: 1.1 * t.s });
     chunks.push({ near, far, cx, cz, n: trees.length });
     total += trees.length;
   });
@@ -115,5 +117,5 @@ export function makePines({ heightAt, maxH, seed, size, avoid, exclude, candidat
     nearGeo.dispose(); farGeo.dispose(); mat.dispose();
     for (const c of chunks) { c.near.dispose(); c.far.dispose(); }
   }
-  return { group, update, dispose, count: total };
+  return { group, update, dispose, count: total, colliders };
 }
