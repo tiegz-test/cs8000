@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
 import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
 import { stepVertical, THRUST_DELAY } from './physics.js';
+import { makeRocks } from './rocks.js';
 import { makeOrb } from './orb.js';
 import { initAudio, beep, setThruster } from './audio.js';
 import { makeRivers } from './rivers.js';
@@ -34,7 +35,7 @@ const clouds = makeClouds();
 scene.add(clouds);
 const cockpit = makeCockpit(SUN_DIR);
 
-let terrain, heightAt, trees, rivers, orb;
+let terrain, heightAt, trees, rivers, orb, rocks;
 const RADAR_RANGE = 150;                    // meters; beyond this the blip sits on the rim
 const grass = makeGrassTexture();
 grass.repeat.set(64, 64); // ~9m tiles: big enough to read on a phone
@@ -90,6 +91,11 @@ function buildTerrain(seed) {
   if (orb) { scene.remove(orb.group); orb.dispose(); }
   orb = makeOrb({ from: { x: sx, z: sz }, heightAt, riverDistance: rivers.distance, size: SIZE, seed, distance: 300 });
   scene.add(orb.group);
+
+  // rocks: keep clear of the spawn point, the beacon and the riverbeds
+  if (rocks) { scene.remove(rocks.group); rocks.dispose(); }
+  rocks = makeRocks({ heightAt, maxH, seed, size: SIZE, avoid: [{ x: sx, z: sz, r: 10 }, { x: orb.x, z: orb.z, r: 8 }], exclude: (x, z) => rivers.distance(x, z) < 8 });
+  scene.add(rocks.group);
 }
 
 const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, vy: 0, grounded: true, vx: 0, vz: 0, thrusting: false, hold: 0, capY: 0 };
@@ -240,7 +246,7 @@ function tick() {
   });
   renderer.clearDepth();
   renderer.render(cockpit.scene, cockpit.camera);
-  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rivers ${rivers.count}`;
+  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rocks ${rocks.count}  rivers ${rivers.count}`;
   requestAnimationFrame(tick);
 }
 tick();
