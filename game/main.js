@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { makeHeightFn } from './terrain.js';
 import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
 import { stepVertical, THRUST_DELAY } from './physics.js';
+import { makeCollisionWorld } from './collision.js';
+import { makeRocks } from './rocks.js';
 import { makeOrb } from './orb.js';
 import { initAudio, beep, setThruster } from './audio.js';
 import { makeRivers } from './rivers.js';
@@ -34,7 +36,8 @@ const clouds = makeClouds();
 scene.add(clouds);
 const cockpit = makeCockpit(SUN_DIR);
 
-let terrain, heightAt, trees, rivers, orb;
+let terrain, heightAt, trees, rivers, orb, rocks;
+const world = makeCollisionWorld();
 const RADAR_RANGE = 150;                    // meters; beyond this the blip sits on the rim
 const grass = makeGrassTexture();
 grass.repeat.set(64, 64); // ~9m tiles: big enough to read on a phone
@@ -90,6 +93,12 @@ function buildTerrain(seed) {
   if (orb) { scene.remove(orb.group); orb.dispose(); }
   orb = makeOrb({ from: { x: sx, z: sz }, heightAt, riverDistance: rivers.distance, size: SIZE, seed, distance: 300 });
   scene.add(orb.group);
+
+  // rocks: keep clear of the spawn point, the beacon and the riverbeds
+  if (rocks) { scene.remove(rocks.group); rocks.dispose(); }
+  rocks = makeRocks({ heightAt, maxH, seed, size: SIZE, avoid: [{ x: sx, z: sz, r: 10 }, { x: orb.x, z: orb.z, r: 8 }], exclude: (x, z) => rivers.distance(x, z) < 8 });
+  scene.add(rocks.group);
+  world.set(trees.colliders, rocks.colliders);
 }
 
 const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, vy: 0, grounded: true, vx: 0, vz: 0, thrusting: false, hold: 0, capY: 0 };
@@ -205,12 +214,17 @@ function tick() {
   }
   player.pos.x = Math.max(-half, Math.min(half, player.pos.x + player.vx * dt));
   player.pos.z = Math.max(-half, Math.min(half, player.pos.z + player.vz * dt));
+  const bump = world.resolve(player.pos, player.pos.y - EYE, prevX, prevZ);   // trees and tall rocks push back
+  if (bump) {                                                                    // slide along the obstacle instead of stopping dead
+    const into = player.vx * bump.nx + player.vz * bump.nz;
+    if (into < 0) { player.vx -= into * bump.nx; player.vz -= into * bump.nz; }
+  }
 
   // vertical motion: glide over the ground, or follow real jump/fall physics
   jumpBuffer = Math.max(0, jumpBuffer - dt);
   const body = { y: player.pos.y, vy: player.vy, grounded: player.grounded, thrusting: player.thrusting, hold: player.hold, capY: player.capY };
   const jumpHeld = !!keys.Space || touchJumpHeld;
-  if (stepVertical(body, heightAt(player.pos.x, player.pos.z) + EYE, dt, jumpBuffer > 0 && player.grounded, jumpHeld)) jumpBuffer = 0;
+  if (stepVertical(body, Math.max(heightAt(player.pos.x, player.pos.z), world.rockTop(player.pos.x, player.pos.z)) + EYE, dt, jumpBuffer > 0 && player.grounded, jumpHeld)) jumpBuffer = 0;
   player.pos.y = body.y; player.vy = body.vy; player.grounded = body.grounded;
   player.thrusting = body.thrusting; player.hold = body.hold; player.capY = body.capY;
   setThruster(player.thrusting);               // booster roar: a puff on a tap, a long burn while held
@@ -240,7 +254,7 @@ function tick() {
   });
   renderer.clearDepth();
   renderer.render(cockpit.scene, cockpit.camera);
-  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rivers ${rivers.count}`;
+  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rocks ${rocks.count}  rivers ${rivers.count}`;
   requestAnimationFrame(tick);
 }
 tick();
