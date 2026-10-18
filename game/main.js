@@ -6,7 +6,7 @@ import { makeCollisionWorld } from './collision.js';
 import { makeRocks } from './rocks.js';
 import { makeSmoke } from './smoke.js';
 import { makePilot } from './pilot.js';
-import { initAudio, beep, setThruster } from './audio.js';
+import { initAudio, beep, setThruster, boostBurst } from './audio.js';
 import { makeRivers } from './rivers.js';
 import { makePines } from './trees.js';
 import { makeCockpit } from './cockpit.js';
@@ -84,7 +84,7 @@ function buildTerrain(seed) {
   player.pos.set(sx, heightAt(sx, sz) + EYE, sz);
   player.yaw = Math.atan2(-(px - sx), -(pz - sz));
   player.pitch = 0.12;
-  player.vy = 0; player.vx = 0; player.vz = 0; player.grounded = true; player.thrusting = false; player.hold = 0;
+  player.vy = 0; player.vx = 0; player.vz = 0; player.grounded = true; player.thrusting = false; player.hold = 0; player.boosted = false; player.jumpedUp = false; player.airTime = 0;
 
   if (trees) { scene.remove(trees.group); trees.dispose(); }
   trees = makePines({ heightAt, maxH, seed, size: SIZE, avoid: { x: sx, z: sz }, exclude: (x, z) => rivers.distance(x, z) < 11 });
@@ -108,7 +108,7 @@ function buildTerrain(seed) {
   world.set(trees.colliders, rocks.colliders);
 }
 
-const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, vy: 0, grounded: true, vx: 0, vz: 0, thrusting: false, hold: 0, capY: 0 };
+const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, vy: 0, grounded: true, vx: 0, vz: 0, thrusting: false, hold: 0, capY: 0, boosted: false, airTime: 0, jumpedUp: false };
 let touchJumpHeld = false;                // JUMP button currently pressed
 let jumpBuffer = 0;                       // seconds a jump press stays queued (forgives early presses)
 const keys = {};
@@ -229,12 +229,14 @@ function tick() {
 
   // vertical motion: glide over the ground, or follow real jump/fall physics
   jumpBuffer = Math.max(0, jumpBuffer - dt);
-  const body = { y: player.pos.y, vy: player.vy, grounded: player.grounded, thrusting: player.thrusting, hold: player.hold, capY: player.capY };
+  const body = { y: player.pos.y, vy: player.vy, grounded: player.grounded, thrusting: player.thrusting, hold: player.hold, capY: player.capY, boosted: player.boosted, airTime: player.airTime, jumpedUp: player.jumpedUp };
   const jumpHeld = !!keys.Space || touchJumpHeld;
-  if (stepVertical(body, Math.max(heightAt(player.pos.x, player.pos.z), world.rockTop(player.pos.x, player.pos.z)) + EYE, dt, jumpBuffer > 0 && player.grounded, jumpHeld)) jumpBuffer = 0;
+  if (stepVertical(body, Math.max(heightAt(player.pos.x, player.pos.z), world.rockTop(player.pos.x, player.pos.z)) + EYE, dt, jumpBuffer > 0, jumpHeld)) jumpBuffer = 0;     // a press jumps on the ground and boosts (once) in the air
   player.pos.y = body.y; player.vy = body.vy; player.grounded = body.grounded;
   player.thrusting = body.thrusting; player.hold = body.hold; player.capY = body.capY;
+  player.boosted = body.boosted; player.airTime = body.airTime; player.jumpedUp = body.jumpedUp;
   setThruster(player.thrusting);               // booster roar: a puff on a tap, a long burn while held
+  if (body.boostFired) boostBurst();            // the double-tap boost flares louder
 
   trees.update(player.pos);
   rivers.update(dt);

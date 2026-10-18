@@ -65,3 +65,19 @@ export function setThruster(on) {
   thruster.rumble.frequency.cancelScheduledValues(t);
   thruster.rumble.frequency.setTargetAtTime(on ? 68 : 48, t, 0.3);
 }
+
+// A louder, sharper whoosh for the double-tap boost: the booster flares, then settles back.
+export function boostBurst() {
+  if (!ctx || ctx.state !== 'running') return;
+  if (!thruster) thruster = buildThruster();
+  const t = ctx.currentTime, g = thruster.master.gain, resting = thruster.on ? 0.026 : 0;
+  g.cancelScheduledValues(t);
+  g.setValueAtTime(0.07, t);
+  g.setTargetAtTime(resting, t + 0.1, 0.14);
+  thruster.roar.frequency.cancelScheduledValues(t);
+  thruster.roar.frequency.setValueAtTime(2400, t);
+  thruster.roar.frequency.setTargetAtTime(thruster.on ? 1100 : 450, t + 0.05, 0.22);
+  thruster.rumble.frequency.cancelScheduledValues(t);
+  thruster.rumble.frequency.setValueAtTime(95, t);
+  thruster.rumble.frequency.setTargetAtTime(thruster.on ? 68 : 48, t + 0.05, 0.25);
+}
