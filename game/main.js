@@ -278,7 +278,7 @@ function tick() {
 
   trees.update(player.pos);
   rivers.update(dt);
-  pilot.update(clock.elapsedTime, player.pos, dt);
+  pilot.update(clock.elapsedTime, player.pos, dt, { resolve: world.resolve });
   smoke.update(clock.elapsedTime);
   skyDome.position.copy(player.pos);
   clouds.userData.update(dt, player.pos);
