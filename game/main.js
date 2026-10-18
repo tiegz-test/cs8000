@@ -5,7 +5,7 @@ import { stepVertical, THRUST_DELAY } from './physics.js';
 import { makeCollisionWorld } from './collision.js';
 import { makeRocks } from './rocks.js';
 import { makeSmoke } from './smoke.js';
-import { makeOrb } from './orb.js';
+import { makePilot } from './pilot.js';
 import { initAudio, beep, setThruster } from './audio.js';
 import { makeRivers } from './rivers.js';
 import { makePines } from './trees.js';
@@ -37,7 +37,7 @@ const clouds = makeClouds();
 scene.add(clouds);
 const cockpit = makeCockpit(SUN_DIR);
 
-let terrain, heightAt, trees, rivers, orb, rocks, smoke;
+let terrain, heightAt, trees, rivers, pilot, rocks, smoke;
 const world = makeCollisionWorld();
 const RADAR_RANGE = 150;                    // meters; beyond this the blip sits on the rim
 const grass = makeGrassTexture();
@@ -90,20 +90,20 @@ function buildTerrain(seed) {
   trees = makePines({ heightAt, maxH, seed, size: SIZE, avoid: { x: sx, z: sz }, exclude: (x, z) => rivers.distance(x, z) < 11 });
   scene.add(trees.group);
 
-  // the rescue beacon, about halfway across the map from where we start
-  if (orb) { scene.remove(orb.group); orb.dispose(); }
-  orb = makeOrb({ from: { x: sx, z: sz }, heightAt, riverDistance: rivers.distance, size: SIZE, seed, distance: 300 });
-  scene.add(orb.group);
+  // the stranded pilot, about halfway across the map from where we start
+  if (pilot) { scene.remove(pilot.group); pilot.dispose(); }
+  pilot = makePilot({ from: { x: sx, z: sz }, heightAt, riverDistance: rivers.distance, size: SIZE, seed, distance: 300 });
+  scene.add(pilot.group);
 
   // a column of smoke rising from the target so it can be spotted from far away
   if (smoke) { scene.remove(smoke.group); smoke.dispose(); }
-  smoke = makeSmoke({ x: orb.x, y: heightAt(orb.x, orb.z), z: orb.z });
+  smoke = makeSmoke({ x: pilot.x, y: heightAt(pilot.x, pilot.z), z: pilot.z });
   scene.add(smoke.group);
-  player.yaw = Math.atan2(-(orb.x - sx), -(orb.z - sz));      // start out facing the smoke
+  player.yaw = Math.atan2(-(pilot.x - sx), -(pilot.z - sz));      // start out facing the smoke
 
   // rocks: keep clear of the spawn point, the beacon and the riverbeds
   if (rocks) { scene.remove(rocks.group); rocks.dispose(); }
-  rocks = makeRocks({ heightAt, maxH, seed, size: SIZE, avoid: [{ x: sx, z: sz, r: 10 }, { x: orb.x, z: orb.z, r: 8 }], exclude: (x, z) => rivers.distance(x, z) < 8 });
+  rocks = makeRocks({ heightAt, maxH, seed, size: SIZE, avoid: [{ x: sx, z: sz, r: 10 }, { x: pilot.x, z: pilot.z, r: 8 }], exclude: (x, z) => rivers.distance(x, z) < 8 });
   scene.add(rocks.group);
   world.set(trees.colliders, rocks.colliders);
 }
@@ -238,7 +238,7 @@ function tick() {
 
   trees.update(player.pos);
   rivers.update(dt);
-  orb.update(clock.elapsedTime);
+  pilot.update(clock.elapsedTime, player.pos, dt);
   smoke.update(clock.elapsedTime);
   skyDome.position.copy(player.pos);
   clouds.userData.update(dt, player.pos);
@@ -246,7 +246,7 @@ function tick() {
   camera.rotation.set(player.pitch, player.yaw, 0);
   renderer.clear();
   renderer.render(scene, camera);
-  const odx = orb.x - player.pos.x, odz = orb.z - player.pos.z;
+  const odx = pilot.x - player.pos.x, odz = pilot.z - player.pos.z;
   const fwd = odx * -Math.sin(player.yaw) + odz * -Math.cos(player.yaw);
   const rgt = odx * Math.cos(player.yaw) + odz * -Math.sin(player.yaw);
   cockpit.update(dt, {
