@@ -4,9 +4,10 @@ import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
 import { stepVertical, THRUST_DELAY } from './physics.js';
 import { makeCollisionWorld } from './collision.js';
 import { makeRocks } from './rocks.js';
+import { makeTurrets } from './turrets.js';
 import { makeSmoke } from './smoke.js';
 import { makePilot } from './pilot.js';
-import { initAudio, beep, setThruster, boostBurst } from './audio.js';
+import { initAudio, beep, setThruster, boostBurst, laserSound, hitSound, deathSound } from './audio.js';
 import { makeRivers } from './rivers.js';
 import { makePines } from './trees.js';
 import { makeCockpit } from './cockpit.js';
@@ -37,7 +38,7 @@ const clouds = makeClouds();
 scene.add(clouds);
 const cockpit = makeCockpit(SUN_DIR);
 
-let terrain, heightAt, trees, rivers, pilot, rocks, smoke;
+let terrain, heightAt, trees, rivers, pilot, rocks, smoke, turrets;
 const world = makeCollisionWorld();
 const RADAR_RANGE = 150;                    // meters; beyond this the blip sits on the rim
 const grass = makeGrassTexture();
@@ -106,9 +107,18 @@ function buildTerrain(seed) {
   rocks = makeRocks({ heightAt, maxH, seed, size: SIZE, avoid: [{ x: sx, z: sz, r: 10 }, { x: pilot.x, z: pilot.z, r: 8 }], exclude: (x, z) => rivers.distance(x, z) < 8 });
   scene.add(rocks.group);
   world.set(trees.colliders, rocks.colliders);
+
+  // enemy turrets on every mountain peak
+  if (turrets) { scene.remove(turrets.group); turrets.dispose(); }
+  turrets = makeTurrets({ heightAt, maxH, size: SIZE, seed });
+  scene.add(turrets.group);
+  turrets.resetGrace(6);                                      // a few quiet seconds at the start
+  player.health = 100; invuln = 0; hitFlash = 0; dead = false;
+  document.getElementById('dead').classList.remove('on');
 }
 
-const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, vy: 0, grounded: true, vx: 0, vz: 0, thrusting: false, hold: 0, capY: 0, boosted: false, airTime: 0, jumpedUp: false };
+const player = { pos: new THREE.Vector3(), yaw: 0, pitch: 0, vy: 0, grounded: true, vx: 0, vz: 0, thrusting: false, hold: 0, capY: 0, boosted: false, airTime: 0, jumpedUp: false, health: 100 };
+let invuln = 0, hitFlash = 0, dead = false;      // brief invulnerability after a hit, hit-flash timer, game over
 let touchJumpHeld = false;                // JUMP button currently pressed
 let jumpBuffer = 0;                       // seconds a jump press stays queued (forgives early presses)
 const keys = {};
@@ -202,12 +212,33 @@ addEventListener('resize', resize);
 resize();
 
 const hud = document.getElementById('hud');
+const hitEl = document.getElementById('hit'), deadEl = document.getElementById('dead');
+const HIT_DAMAGE = 10;                                         // percent of the hull per laser hit
+
+function takeHit() {
+  if (dead || invuln > 0) return;
+  player.health = Math.max(0, player.health - HIT_DAMAGE);
+  invuln = 0.3; hitFlash = 0.5;
+  hitEl.animate([{ opacity: 0.85 }, { opacity: 0 }], { duration: 450 });
+  hitSound();
+  if (player.health <= 0) {                                     // destroyed: the screen flashes red until you redeploy
+    dead = true;
+    turrets.clearBolts();
+    deadEl.classList.add('on');
+    deathSound();
+  }
+}
+function redeploy() { if (dead) buildTerrain(seed); }          // same map, fresh hull
+deadEl.addEventListener('click', redeploy);
+addEventListener('keydown', (e) => { if (e.code === 'KeyR') redeploy(); });
+
 const clock = new THREE.Clock();
 const half = SIZE / 2 - 5;
 function tick() {
   const dt = Math.min(clock.getDelta(), 0.05);
   let fx = (keys.KeyW || keys.ArrowUp ? 1 : 0) - (keys.KeyS || keys.ArrowDown ? 1 : 0) - stick.y;
   let sx = (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0) + stick.x;
+  if (dead) { fx = 0; sx = 0; jumpBuffer = 0; }
   const len = Math.hypot(fx, sx);
   if (len > 1) { fx /= len; sx /= len; }
   const speed = keys.ShiftLeft || keys.ShiftRight ? 14 : 7;
@@ -230,13 +261,20 @@ function tick() {
   // vertical motion: glide over the ground, or follow real jump/fall physics
   jumpBuffer = Math.max(0, jumpBuffer - dt);
   const body = { y: player.pos.y, vy: player.vy, grounded: player.grounded, thrusting: player.thrusting, hold: player.hold, capY: player.capY, boosted: player.boosted, airTime: player.airTime, jumpedUp: player.jumpedUp };
-  const jumpHeld = !!keys.Space || touchJumpHeld;
+  const jumpHeld = !dead && (!!keys.Space || touchJumpHeld);
   if (stepVertical(body, Math.max(heightAt(player.pos.x, player.pos.z), world.rockTop(player.pos.x, player.pos.z)) + EYE, dt, jumpBuffer > 0, jumpHeld)) jumpBuffer = 0;     // a press jumps on the ground and boosts (once) in the air
   player.pos.y = body.y; player.vy = body.vy; player.grounded = body.grounded;
   player.thrusting = body.thrusting; player.hold = body.hold; player.capY = body.capY;
   player.boosted = body.boosted; player.airTime = body.airTime; player.jumpedUp = body.jumpedUp;
   setThruster(player.thrusting);               // booster roar: a puff on a tap, a long burn while held
   if (body.boostFired) boostBurst();            // the double-tap boost flares louder
+
+  invuln = Math.max(0, invuln - dt); hitFlash = Math.max(0, hitFlash - dt);
+  const hspeed = dt > 0 ? Math.hypot(player.pos.x - prevX, player.pos.z - prevZ) / dt : 0;
+  turrets.update(dt, clock.elapsedTime, {
+    pos: player.pos, vx: player.vx, vy: player.vy, vz: player.vz,
+    moving: hspeed > 1.2 || !player.grounded,                   // standing still keeps you hidden from the turrets
+  }, { onFire: laserSound, onHit: takeHit, enabled: !dead });
 
   trees.update(player.pos);
   rivers.update(dt);
@@ -260,11 +298,13 @@ function tick() {
     edge: Math.max(Math.abs(player.pos.x), Math.abs(player.pos.z)) > half - 15,
     alt: player.pos.y,
     heading: ((-THREE.MathUtils.radToDeg(player.yaw)) % 360 + 360) % 360,
-    speed: dt > 0 ? Math.hypot(player.pos.x - prevX, player.pos.z - prevZ) / dt : 0,
+    speed: hspeed,
+    health: player.health,
+    hitFlash,
   });
   renderer.clearDepth();
   renderer.render(cockpit.scene, cockpit.camera);
-  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rocks ${rocks.count}  rivers ${rivers.count}`;
+  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rocks ${rocks.count}  turrets ${turrets.count}  rivers ${rivers.count}`;
   requestAnimationFrame(tick);
 }
 tick();

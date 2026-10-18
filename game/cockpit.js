@@ -181,9 +181,28 @@ function makeScreenTexture() {
     ctx.fillStyle = tg && tg.dist <= range ? '#ffd84a' : '#9a8a3a';
     ctx.font = 'bold 17px monospace';
     ctx.fillText(status, 322, 190);
-    ctx.fillStyle = Math.floor(t * 2) % 2 ? '#ff5544' : '#662218';
+    // hull integrity meter
+    const hp = Math.max(0, Math.min(100, info.health ?? 100));
+    const low = hp <= 30, blink = Math.floor(t * 4) % 2 === 0;
+    const hullColor = hp > 60 ? '#5dff8a' : hp > 30 ? '#ffc23a' : '#ff4433';
+    ctx.font = 'bold 15px monospace';
+    ctx.fillStyle = '#9fffbf';
+    ctx.fillText('HULL', 322, 214);
+    ctx.fillStyle = low && !blink ? '#661a14' : hullColor;
+    ctx.font = 'bold 22px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(`${Math.round(hp)}%`, 500, 214);
+    ctx.textAlign = 'left';
+    ctx.strokeStyle = 'rgba(160,255,190,.6)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(322, 224, 178, 18);
+    const segs = 20, w = 178 / segs;
+    ctx.fillStyle = low && !blink ? '#661a14' : hullColor;
+    for (let i = 0; i < Math.ceil(hp / 100 * segs - 1e-6); i++) ctx.fillRect(324 + i * w, 227, w - 2, 12);
+    if (info.hitFlash > 0) { ctx.fillStyle = `rgba(255,50,40,${Math.min(0.5, info.hitFlash)})`; ctx.fillRect(0, 0, SCREEN_W, SCREEN_H); }
+    ctx.fillStyle = hp <= 0 ? (blink ? '#ff4433' : '#661a14') : low ? (blink ? '#ff5544' : '#662218') : (Math.floor(t * 2) % 2 ? '#ff5544' : '#662218');
     ctx.font = 'bold 19px monospace';
-    ctx.fillText('SYS OK', 322, 270);
+    ctx.fillText(hp <= 0 ? 'OFFLINE' : low ? 'DAMAGE' : 'SYS OK', 322, 280);
     tex.needsUpdate = true;
   };
   return tex;
@@ -411,7 +430,7 @@ function makeDeck() {
 
   // master caution lights above the screen
   led(-0.07, -0.385, 0xffb02e, (t, info) => (info.speed > 10 || info.thrust ? 1 : 0.0), 0.008);   // amber: running or booster burning
-  led(0.07, -0.385, 0xff3b2a, (t, info) => (info.edge ? 0.5 + 0.5 * Math.sin(t * 8) : 0), 0.008);
+  led(0.07, -0.385, 0xff3b2a, (t, info) => (info.edge || info.health <= 30 ? 0.5 + 0.5 * Math.sin(t * 8) : 0), 0.008);
 
   const update = (t, info) => {
     for (const l of leds) l.mat.emissiveIntensity = l.fn(t, info) * 1.4;
