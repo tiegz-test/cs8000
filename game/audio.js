@@ -81,3 +81,54 @@ export function boostBurst() {
   thruster.rumble.frequency.setValueAtTime(95, t);
   thruster.rumble.frequency.setTargetAtTime(thruster.on ? 68 : 48, t + 0.05, 0.25);
 }
+
+// --- combat sounds ---
+// A turret's laser: a quick falling zap, quieter the farther away the turret is.
+export function laserSound(dist = 100) {
+  if (!ctx || ctx.state !== 'running') return;
+  const vol = 0.05 * Math.max(0.12, 1 - dist / 380), t = ctx.currentTime;
+  const osc = ctx.createOscillator(), gain = ctx.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(1500, t);
+  osc.frequency.exponentialRampToValueAtTime(260, t + 0.2);
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t); osc.stop(t + 0.25);
+}
+
+// Taking a hit: a low thump with a crackle on top.
+export function hitSound() {
+  if (!ctx || ctx.state !== 'running') return;
+  const t = ctx.currentTime;
+  const thump = ctx.createOscillator(), tg = ctx.createGain();
+  thump.type = 'sine';
+  thump.frequency.setValueAtTime(150, t);
+  thump.frequency.exponentialRampToValueAtTime(45, t + 0.25);
+  tg.gain.setValueAtTime(0.22, t);
+  tg.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+  thump.connect(tg).connect(ctx.destination);
+  thump.start(t); thump.stop(t + 0.32);
+  const len = Math.floor(ctx.sampleRate * 0.25), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const noise = ctx.createBufferSource(), ng = ctx.createGain();
+  noise.buffer = buf;
+  ng.gain.value = 0.16;
+  noise.connect(ng).connect(ctx.destination);
+  noise.start(t);
+}
+
+// Hull gone: a long falling alarm tone.
+export function deathSound() {
+  if (!ctx || ctx.state !== 'running') return;
+  const t = ctx.currentTime, osc = ctx.createOscillator(), gain = ctx.createGain();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(520, t);
+  osc.frequency.exponentialRampToValueAtTime(38, t + 1.6);
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(0.09, t + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t); osc.stop(t + 1.75);
+}
