@@ -4,6 +4,7 @@ import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
 import { stepVertical, THRUST_DELAY } from './physics.js';
 import { makeCollisionWorld } from './collision.js';
 import { makeRocks } from './rocks.js';
+import { makeSmoke } from './smoke.js';
 import { makeOrb } from './orb.js';
 import { initAudio, beep, setThruster } from './audio.js';
 import { makeRivers } from './rivers.js';
@@ -36,7 +37,7 @@ const clouds = makeClouds();
 scene.add(clouds);
 const cockpit = makeCockpit(SUN_DIR);
 
-let terrain, heightAt, trees, rivers, orb, rocks;
+let terrain, heightAt, trees, rivers, orb, rocks, smoke;
 const world = makeCollisionWorld();
 const RADAR_RANGE = 150;                    // meters; beyond this the blip sits on the rim
 const grass = makeGrassTexture();
@@ -93,6 +94,12 @@ function buildTerrain(seed) {
   if (orb) { scene.remove(orb.group); orb.dispose(); }
   orb = makeOrb({ from: { x: sx, z: sz }, heightAt, riverDistance: rivers.distance, size: SIZE, seed, distance: 300 });
   scene.add(orb.group);
+
+  // a column of smoke rising from the target so it can be spotted from far away
+  if (smoke) { scene.remove(smoke.group); smoke.dispose(); }
+  smoke = makeSmoke({ x: orb.x, y: heightAt(orb.x, orb.z), z: orb.z });
+  scene.add(smoke.group);
+  player.yaw = Math.atan2(-(orb.x - sx), -(orb.z - sz));      // start out facing the smoke
 
   // rocks: keep clear of the spawn point, the beacon and the riverbeds
   if (rocks) { scene.remove(rocks.group); rocks.dispose(); }
@@ -232,6 +239,7 @@ function tick() {
   trees.update(player.pos);
   rivers.update(dt);
   orb.update(clock.elapsedTime);
+  smoke.update(clock.elapsedTime);
   skyDome.position.copy(player.pos);
   clouds.userData.update(dt, player.pos);
   camera.position.copy(player.pos);
