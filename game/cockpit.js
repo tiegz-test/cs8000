@@ -76,6 +76,7 @@ function onGlass(center, yaw, pitch, r = GLASS_RADIUS * 0.99) {
 }
 
 const SCREEN_W = 512, SCREEN_H = 305;
+const DOOR_SWING = -1.25;      // rad the hatch swings when fully open
 
 function makeScreenTexture() {
   const cv = document.createElement('canvas');
@@ -94,7 +95,7 @@ function makeScreenTexture() {
 
     // ---- radar (heading-up: forward is the top of the scope) ----
     const cx = 152, cy = 152, R = 140;
-    const range = info.radarRange, tg = info.target;
+    const range = info.radarRange;
     ctx.lineWidth = 1.5;
     ctx.strokeStyle = 'rgba(80,255,140,.45)';
     for (const k of [1, 0.75, 0.5, 0.25]) { ctx.beginPath(); ctx.arc(cx, cy, R * k, 0, TAU); ctx.stroke(); }
@@ -127,18 +128,20 @@ function makeScreenTexture() {
     ctx.strokeStyle = '#7dffaa';
     ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(sweep) * R, cy + Math.sin(sweep) * R); ctx.stroke();
 
-    // ---- target blip ----
-    let status = 'SEARCHING';
-    if (tg) {
+    // ---- target blips: one per pilot still waiting to be rescued ----
+    const targets = info.targets || [];
+    let nearest = null, pingFor = null;
+    for (const tg of targets) {
       const inRange = tg.dist <= range;
+      if (!nearest || tg.dist < nearest.dist) nearest = tg;
       const ang = tg.bearing - Math.PI / 2;                   // bearing (0 = ahead) -> canvas angle
       const rr = inRange ? Math.max(8, R * tg.dist / range) : R - 7;   // out of range: parked on the rim
       const bx = cx + Math.cos(ang) * rr, by = cy + Math.sin(ang) * rr;
       const since = mod(sweep - ang);                         // radians since the sweep passed the blip
       const glow = 0.12 + 0.88 * Math.exp(-since * 1.3);
 
-      // ping when the sweep crosses the blip
-      if (Math.floor((sweep - ang) / TAU) > Math.floor((prevSweep - ang) / TAU)) info.ping?.(inRange, tg.dist);
+      // ping when the sweep crosses a blip (one ping per frame, for the closest)
+      if (Math.floor((sweep - ang) / TAU) > Math.floor((prevSweep - ang) / TAU) && (!pingFor || tg.dist < pingFor.dist)) pingFor = tg;
 
       if (inRange) {
         const g2 = ctx.createRadialGradient(bx, by, 0, bx, by, 26);
@@ -153,7 +156,6 @@ function makeScreenTexture() {
           ctx.lineWidth = 2;
           ctx.beginPath(); ctx.arc(bx, by, 6 + since * 18, 0, TAU); ctx.stroke();
         }
-        status = `TGT ${String(Math.round(tg.dist)).padStart(3, ' ')}m`;
       } else {
         // faint, hollow marker with an outward chevron: "something is out there, that way"
         ctx.strokeStyle = `rgba(255,220,60,${0.3 + 0.7 * glow})`;
@@ -165,9 +167,10 @@ function makeScreenTexture() {
         ctx.lineTo(bx + ox * 19, by + oy * 19);
         ctx.lineTo(bx + ox * 13 + oy * 5, by + oy * 13 - ox * 5);
         ctx.stroke();
-        status = 'OUT OF RANGE';
       }
     }
+    if (pingFor) info.ping?.(pingFor.dist <= range, pingFor.dist);
+    const status = !targets.length ? 'ALL SAFE' : nearest.dist <= range ? `TGT ${String(Math.round(nearest.dist)).padStart(3, ' ')}m` : 'OUT OF RANGE';
     prevSweep = sweep;
 
     // ---- readouts ----
@@ -178,9 +181,11 @@ function makeScreenTexture() {
     ctx.fillText(`HDG ${String(Math.round(info.heading)).padStart(3, '0')}`, 322, 72);
     ctx.fillText(`SPD ${info.speed.toFixed(1)}`, 322, 104);
     ctx.fillText(`RNG ${Math.round(range)}m`, 322, 136);
-    ctx.fillStyle = tg && tg.dist <= range ? '#ffd84a' : '#9a8a3a';
     ctx.font = 'bold 17px monospace';
-    ctx.fillText(status, 322, 190);
+    ctx.fillStyle = (info.rescued ?? 0) >= (info.totalTargets ?? 1) ? '#7dffaa' : '#ffd84a';
+    ctx.fillText(`SAVED ${info.rescued ?? 0}/${info.totalTargets ?? 1}`, 322, 163);
+    ctx.fillStyle = !targets.length ? '#7dffaa' : nearest.dist <= range ? '#ffd84a' : '#9a8a3a';
+    ctx.fillText(status, 322, 188);
     // hull integrity meter
     const hp = Math.max(0, Math.min(100, info.health ?? 100));
     const low = hp <= 30, blink = Math.floor(t * 4) % 2 === 0;
@@ -470,6 +475,12 @@ function makeDoor(center, hazardMat) {
   const group = new THREE.Group();
   const Rd = GLASS_RADIUS * 0.975;
   const YA = 0.33, YB = 0.6, P0 = -0.55, P1 = 0.3;           // door extents (yaw, pitch)
+  // the door swings about a vertical hinge on its outer edge: build it in `group`, hang that from `pivot`
+  const hinge = onGlass(center, YB * 1.06, 0, Rd); hinge.y = 0;
+  const pivot = new THREE.Group();
+  pivot.position.copy(hinge);
+  group.position.set(-hinge.x, 0, -hinge.z);
+  pivot.add(group);
   const place = (obj, yaw, pitch, r = Rd - 0.008) => {
     const k = 1.12 - 0.12 * ((pitch + 0.6) / 0.93);
     obj.position.copy(onGlass(center, yaw * k, pitch, r));
@@ -570,7 +581,7 @@ function makeDoor(center, hazardMat) {
   const strip = new THREE.Mesh(patchGeometry(center, YA + 0.015, YB - 0.015, -0.4, -0.34, Rd - 0.003), hazardMat);
   group.add(strip);
 
-  return { group, lampMat };
+  return { group: pivot, lampMat };
 }
 
 export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize()) {
@@ -625,6 +636,7 @@ export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize
   const hazardMat = new THREE.MeshBasicMaterial({ map: hazardTexture(), side: THREE.DoubleSide });
   const door = makeDoor(center, hazardMat);
   scene.add(door.group);
+  let doorOpen = 0, doorTarget = 0;                              // 0 = shut, 1 = swung wide open
 
   const deck = makeDeck();
   scene.add(deck);
@@ -649,6 +661,8 @@ export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize
     tmp.t += dt;
     const t = tmp.t;
     deck.userData.update(t, info);
+    doorOpen += (doorTarget - doorOpen) * Math.min(1, dt * 3.2);
+    door.group.rotation.y = DOOR_SWING * doorOpen;
     door.lampMat.emissiveIntensity = 0.5 + 0.5 * Math.sin(t * 2.4) ** 2 * (info.edge ? 3 : 1);
     if (t - tmp.lastScreen > 0.08) {
       tmp.lastScreen = t;
@@ -656,5 +670,5 @@ export function makeCockpit(sunDir = new THREE.Vector3(0.4, 0.6, -0.6).normalize
     }
   }
 
-  return { scene, camera, resize, update };
+  return { scene, camera, resize, update, setDoorOpen(open) { doorTarget = open ? 1 : 0; }, get doorOpen() { return doorOpen; } };
 }

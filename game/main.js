@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeHeightFn } from './terrain.js';
+import { makeHeightFn, mulberry32 } from './terrain.js';
 import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
 import { stepVertical, THRUST_DELAY } from './physics.js';
 import { makeCollisionWorld } from './collision.js';
@@ -9,7 +9,7 @@ import { makeMissiles, BLAST_TREES, BLAST_TURRET } from './missiles.js';
 import { makeTurrets } from './turrets.js';
 import { makeSmoke } from './smoke.js';
 import { makePilot } from './pilot.js';
-import { initAudio, beep, setThruster, boostBurst, laserSound, hitSound, deathSound, missileLaunch, explosionSound } from './audio.js';
+import { initAudio, beep, setThruster, boostBurst, laserSound, hitSound, deathSound, missileLaunch, explosionSound, doorSound, rescueChime } from './audio.js';
 import { makeRivers } from './rivers.js';
 import { makePines } from './trees.js';
 import { makeCockpit } from './cockpit.js';
@@ -40,7 +40,9 @@ const clouds = makeClouds();
 scene.add(clouds);
 const cockpit = makeCockpit(SUN_DIR);
 
-let terrain, heightAt, trees, rivers, pilot, rocks, smoke, turrets;
+let terrain, heightAt, trees, rivers, rocks, turrets;
+let pilots = [], smokes = [];             // the stranded pilots (1 to 5 per map) and the smoke marking each crash site
+let rescued = 0, doorLinger = 0, wasBoarding = false;
 const effects = makeEffects(scene);       // explosion flashes, smoke and debris
 const missiles = makeMissiles(scene);
 let wrecks = [];                          // smoke columns rising from destroyed turrets
@@ -96,20 +98,27 @@ function buildTerrain(seed) {
   trees = makePines({ heightAt, maxH, seed, size: SIZE, avoid: { x: sx, z: sz }, exclude: (x, z) => rivers.distance(x, z) < 11 });
   scene.add(trees.group);
 
-  // the stranded pilot, about halfway across the map from where we start
-  if (pilot) { scene.remove(pilot.group); pilot.dispose(); }
-  pilot = makePilot({ from: { x: sx, z: sz }, heightAt, riverDistance: rivers.distance, size: SIZE, seed, distance: 300 });
-  scene.add(pilot.group);
-
-  // a column of smoke rising from the target so it can be spotted from far away
-  if (smoke) { scene.remove(smoke.group); smoke.dispose(); }
-  smoke = makeSmoke({ x: pilot.x, y: heightAt(pilot.x, pilot.z), z: pilot.z });
-  scene.add(smoke.group);
-  player.yaw = Math.atan2(-(pilot.x - sx), -(pilot.z - sz));      // start out facing the smoke
+  // the stranded pilots: a random 1 to 5, spread across the map, each with a column of smoke over their crash site
+  for (const p of pilots) { scene.remove(p.group); p.dispose(); }
+  for (const sm of smokes) { scene.remove(sm.group); sm.dispose(); }
+  pilots = []; smokes = []; rescued = 0; doorLinger = 0; wasBoarding = false;
+  cockpit.setDoorOpen(false);
+  const rng = mulberry32(seed * 7 + 3);
+  const nTargets = 1 + Math.floor(rng() * 5);
+  const taken = [{ x: sx, z: sz, r: 70 }];
+  for (let i = 0; i < nTargets; i++) {
+    const p = makePilot({ from: { x: sx, z: sz }, heightAt, riverDistance: rivers.distance, size: SIZE, seed: seed + i * 131, distance: 150 + rng() * 270, avoid: taken });
+    taken.push({ x: p.x, z: p.z, r: 90 });
+    scene.add(p.group); pilots.push(p);
+    const sm = makeSmoke({ x: p.x, y: heightAt(p.x, p.z), z: p.z });
+    sm.pilot = p; scene.add(sm.group); smokes.push(sm);
+  }
+  const first = pilots.reduce((a, b) => (Math.hypot(a.x - sx, a.z - sz) < Math.hypot(b.x - sx, b.z - sz) ? a : b));
+  player.yaw = Math.atan2(-(first.x - sx), -(first.z - sz));       // start out facing the nearest smoke column
 
   // rocks: keep clear of the spawn point, the beacon and the riverbeds
   if (rocks) { scene.remove(rocks.group); rocks.dispose(); }
-  rocks = makeRocks({ heightAt, maxH, seed, size: SIZE, avoid: [{ x: sx, z: sz, r: 10 }, { x: pilot.x, z: pilot.z, r: 8 }], exclude: (x, z) => rivers.distance(x, z) < 8 });
+  rocks = makeRocks({ heightAt, maxH, seed, size: SIZE, avoid: [{ x: sx, z: sz, r: 10 }, ...pilots.map((p) => ({ x: p.x, z: p.z, r: 8 }))], exclude: (x, z) => rivers.distance(x, z) < 8 });
   scene.add(rocks.group);
   world.set(trees.colliders, rocks.colliders);
 
@@ -228,6 +237,13 @@ addEventListener('resize', resize);
 resize();
 
 const hud = document.getElementById('hud');
+const toastEl = document.getElementById('toast');
+let toastAnim = null;
+function showToast(text, ms = 2800) {                          // a short message in the middle of the screen
+  toastEl.textContent = text;
+  toastAnim?.cancel();
+  toastAnim = toastEl.animate([{ opacity: 0 }, { opacity: 1, offset: 0.08 }, { opacity: 1, offset: 0.85 }, { opacity: 0 }], { duration: ms, fill: 'forwards' });
+}
 
 // Everything a missile can hit, and what its explosion does.
 function onMissileExplode(pt) {
@@ -321,20 +337,39 @@ function tick() {
 
   trees.update(player.pos);
   rivers.update(dt);
-  pilot.update(clock.elapsedTime, player.pos, dt, { resolve: world.resolve });
-  smoke.update(clock.elapsedTime);
+  for (const p of pilots) p.update(clock.elapsedTime, player.pos, dt, { resolve: world.resolve, playerYaw: player.yaw });
+  for (const sm of smokes) sm.update(clock.elapsedTime);
+
+  // boarding: the hatch opens while a pilot is coming aboard; when they're in they leave the radar and the map
+  const boarding = pilots.some((p) => p.state === 'boarding' || p.state === 'entering');
+  if (boarding && !wasBoarding) doorSound();
+  wasBoarding = boarding;
+  for (const p of pilots) {
+    if (p.state !== 'done' || p.counted) continue;
+    p.counted = true; rescued++; doorLinger = 1.3;
+    const sm = smokes.find((x) => x.pilot === p);                 // their crash-site smoke is no longer needed
+    if (sm) { scene.remove(sm.group); sm.dispose(); smokes.splice(smokes.indexOf(sm), 1); }
+    const all = rescued >= pilots.length;
+    rescueChime(all);
+    showToast(all ? `ALL ${pilots.length} PILOT${pilots.length > 1 ? 'S' : ''} RESCUED!` : `PILOT RESCUED  ${rescued}/${pilots.length}`, all ? 6000 : 2800);
+  }
+  doorLinger = Math.max(0, doorLinger - dt);
+  cockpit.setDoorOpen(boarding || doorLinger > 0);
   skyDome.position.copy(player.pos);
   clouds.userData.update(dt, player.pos);
   camera.position.copy(player.pos);
   camera.rotation.set(player.pitch, player.yaw, 0);
   renderer.clear();
   renderer.render(scene, camera);
-  const odx = pilot.x - player.pos.x, odz = pilot.z - player.pos.z;
-  const fwd = odx * -Math.sin(player.yaw) + odz * -Math.cos(player.yaw);
-  const rgt = odx * Math.cos(player.yaw) + odz * -Math.sin(player.yaw);
+  const targets = pilots.filter((p) => p.state !== 'done').map((p) => {      // every pilot still to be rescued
+    const odx = p.x - player.pos.x, odz = p.z - player.pos.z;
+    const fwd = odx * -Math.sin(player.yaw) + odz * -Math.cos(player.yaw);
+    const rgt = odx * Math.cos(player.yaw) + odz * -Math.sin(player.yaw);
+    return { dist: Math.hypot(odx, odz), bearing: Math.atan2(rgt, fwd) };
+  });
   cockpit.update(dt, {
     radarRange: RADAR_RANGE,
-    target: { dist: Math.hypot(odx, odz), bearing: Math.atan2(rgt, fwd) },
+    targets, rescued, totalTargets: pilots.length,
     ping: (inRange, dist) => beep(inRange ? 700 + 700 * (1 - dist / RADAR_RANGE) : 480, inRange ? 0.07 : 0.035),
     camQuat: camera.quaternion,
     thrust: player.thrusting && player.hold >= THRUST_DELAY,
@@ -347,7 +382,7 @@ function tick() {
   });
   renderer.clearDepth();
   renderer.render(cockpit.scene, cockpit.camera);
-  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rocks ${rocks.count}  turrets ${turrets.count}/${turrets.total}  rivers ${rivers.count}`;
+  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rocks ${rocks.count}  turrets ${turrets.count}/${turrets.total}  pilots ${rescued}/${pilots.length}  rivers ${rivers.count}`;
   requestAnimationFrame(tick);
 }
 tick();

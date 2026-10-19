@@ -162,3 +162,31 @@ export function explosionSound(dist = 50) {
   const ng = ctx.createGain(); ng.gain.value = 0.35 * vol;
   noise.connect(lp).connect(ng).connect(ctx.destination); noise.start(t);
 }
+
+// --- rescue ---
+// The hatch opening: a pneumatic hiss and a heavy clunk.
+export function doorSound() {
+  if (!ctx || ctx.state !== 'running') return;
+  const t = ctx.currentTime, len = Math.floor(ctx.sampleRate * 0.55), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 1.5);
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 1800;
+  const g = ctx.createGain(); g.gain.value = 0.09;
+  src.connect(hp).connect(g).connect(ctx.destination); src.start(t);
+  const clunk = ctx.createOscillator(), cg = ctx.createGain();
+  clunk.type = 'square'; clunk.frequency.setValueAtTime(95, t + 0.45); clunk.frequency.exponentialRampToValueAtTime(45, t + 0.7);
+  cg.gain.setValueAtTime(0.0001, t + 0.44); cg.gain.exponentialRampToValueAtTime(0.1, t + 0.46); cg.gain.exponentialRampToValueAtTime(0.0001, t + 0.75);
+  clunk.connect(cg).connect(ctx.destination); clunk.start(t + 0.44); clunk.stop(t + 0.8);
+}
+
+// A pilot is aboard: a bright two-note chime (a longer rising run when the last one is saved).
+export function rescueChime(all = false) {
+  if (!ctx || ctx.state !== 'running') return;
+  const notes = all ? [523, 659, 784, 1047] : [660, 880];
+  notes.forEach((f, i) => {
+    const t = ctx.currentTime + i * 0.14, osc = ctx.createOscillator(), g = ctx.createGain();
+    osc.type = 'triangle'; osc.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    osc.connect(g).connect(ctx.destination); osc.start(t); osc.stop(t + 0.45);
+  });
+}
