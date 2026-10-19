@@ -20,8 +20,12 @@
     #knob { position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%;
       background: rgba(255,255,255,.7); }
     #hud { position: fixed; top: 8px; left: 10px; max-width: calc(100vw - 120px); color: #fff; font-size: 12px; text-shadow: 0 1px 2px #000; pointer-events: none; }
-    #cross { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%;
-      background: rgba(255,255,255,.7); pointer-events: none; }
+    #cross { position: fixed; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; pointer-events: none;
+      filter: drop-shadow(0 0 2px rgba(0,0,0,.7)); z-index: 3; }
+    #cross svg { width: 100%; height: 100%; display: block; }
+    #fire { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(24px, env(safe-area-inset-bottom)) + 100px); display: none;
+      width: 76px; height: 76px; border-radius: 50%; border: 2px solid rgba(255,90,80,.85); background: rgba(255,50,40,.28);
+      color: #fff; font: bold 13px system-ui, sans-serif; touch-action: none; -webkit-tap-highlight-color: transparent; z-index: 2; }
     #jump { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(24px, env(safe-area-inset-bottom)) + 8px); display: none;
       width: 76px; height: 76px; border-radius: 50%; border: 2px solid rgba(255,255,255,.6); background: rgba(255,255,255,.18);
       color: #fff; font: bold 13px system-ui, sans-serif; touch-action: none; -webkit-tap-highlight-color: transparent; z-index: 2; }
@@ -49,11 +53,14 @@
     Desktop: WASD / arrows + mouse (click to capture), Shift to run</small></div>
   </div></div>
   <div id="stick"><div id="knob"></div></div>
-  <div id="cross"></div>
+  <div id="cross"><svg viewBox="0 0 46 46" fill="none" stroke="#ff2a22" stroke-width="2.4" stroke-linecap="round">
+    <circle cx="23" cy="23" r="12.5"/><circle cx="23" cy="23" r="1.9" fill="#ff2a22" stroke="none"/>
+    <path d="M23 2v13M23 31v13M2 23h13M31 23h13"/></svg></div>
   <div id="hud"></div>
   <div id="hit"></div>
   <div id="dead"><div>MECH DESTROYED<small>tap or press R to redeploy</small></div></div>
   <button id="new">New map</button>
+  <button id="fire">FIRE</button>
   <button id="jump">JUMP</button>
   <script type="module" src="./main.js"></script>
 </body>

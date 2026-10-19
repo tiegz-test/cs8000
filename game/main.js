@@ -4,10 +4,12 @@ import { makeSkyDome, makeClouds, sunDirection, HORIZON } from './sky.js';
 import { stepVertical, THRUST_DELAY } from './physics.js';
 import { makeCollisionWorld } from './collision.js';
 import { makeRocks } from './rocks.js';
+import { makeEffects } from './effects.js';
+import { makeMissiles, BLAST_TREES, BLAST_TURRET } from './missiles.js';
 import { makeTurrets } from './turrets.js';
 import { makeSmoke } from './smoke.js';
 import { makePilot } from './pilot.js';
-import { initAudio, beep, setThruster, boostBurst, laserSound, hitSound, deathSound } from './audio.js';
+import { initAudio, beep, setThruster, boostBurst, laserSound, hitSound, deathSound, missileLaunch, explosionSound } from './audio.js';
 import { makeRivers } from './rivers.js';
 import { makePines } from './trees.js';
 import { makeCockpit } from './cockpit.js';
@@ -39,6 +41,9 @@ scene.add(clouds);
 const cockpit = makeCockpit(SUN_DIR);
 
 let terrain, heightAt, trees, rivers, pilot, rocks, smoke, turrets;
+const effects = makeEffects(scene);       // explosion flashes, smoke and debris
+const missiles = makeMissiles(scene);
+let wrecks = [];                          // smoke columns rising from destroyed turrets
 const world = makeCollisionWorld();
 const RADAR_RANGE = 150;                    // meters; beyond this the blip sits on the rim
 const grass = makeGrassTexture();
@@ -113,6 +118,9 @@ function buildTerrain(seed) {
   turrets = makeTurrets({ heightAt, maxH, size: SIZE, seed });
   scene.add(turrets.group);
   turrets.resetGrace(6);                                      // a few quiet seconds at the start
+  missiles.clear();
+  for (const w of wrecks) { scene.remove(w.group); w.dispose(); }
+  wrecks = [];
   player.health = 100; invuln = 0; hitFlash = 0; dead = false;
   document.getElementById('dead').classList.remove('on');
 }
@@ -194,6 +202,14 @@ jumpBtn.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropag
 const releaseJump = (e) => { e.stopPropagation(); touchJumpHeld = false; };
 jumpBtn.addEventListener('touchend', releaseJump);
 jumpBtn.addEventListener('touchcancel', releaseJump);
+let fireQueued = false, fireCooldown = 0;
+const FIRE_EVERY = 0.55;                                       // s between missiles
+addEventListener('mousedown', (e) => {                         // left mouse button fires at the crosshair
+  if (e.button === 0 && startEl.style.display === 'none') fireQueued = true;
+});
+const fireBtn = document.getElementById('fire');
+if (touchUI) fireBtn.style.display = 'block';
+fireBtn.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); fireQueued = true; }, { passive: false });
 document.getElementById('new').addEventListener('click', (e) => {
   e.stopPropagation();
   seed = Math.floor(Math.random() * 1e6);
@@ -212,6 +228,27 @@ addEventListener('resize', resize);
 resize();
 
 const hud = document.getElementById('hud');
+
+// Everything a missile can hit, and what its explosion does.
+function onMissileExplode(pt) {
+  effects.explode(pt.x, pt.y, pt.z, 1);
+  explosionSound(Math.hypot(pt.x - player.pos.x, pt.y - player.pos.y, pt.z - player.pos.z));
+  for (const t of trees.destroyWithin(pt.x, pt.y, pt.z, BLAST_TREES).slice(0, 8)) effects.explode(t.x, t.y + 3 * t.s, t.z, 0.55);
+  for (const k of turrets.damageAt(pt.x, pt.y, pt.z, BLAST_TURRET)) {
+    effects.explode(k.x, k.y, k.z, 2.6);                       // the turret blows up...
+    const wreck = makeSmoke({ x: k.x, y: k.y - 3.2, z: k.z, height: 90, life: 11 });   // ...and leaves a column of smoke
+    scene.add(wreck.group); wrecks.push(wreck);
+  }
+}
+function shootMissile() {
+  const cy = Math.cos(player.pitch), f = new THREE.Vector3(-Math.sin(player.yaw) * cy, Math.sin(player.pitch), -Math.cos(player.yaw) * cy);
+  const right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw));
+  const muzzle = player.pos.clone().addScaledVector(right, 0.9).addScaledVector(f, 2.5).add(new THREE.Vector3(0, -0.6, 0));
+  if (missiles.fire(player.pos, f, muzzle, { heightAt, world, trees, turrets })) {
+    missileLaunch();
+    document.getElementById('cross').animate([{ transform: 'scale(1.35)' }, { transform: 'scale(1)' }], { duration: 160 });
+  }
+}
 const hitEl = document.getElementById('hit'), deadEl = document.getElementById('dead');
 const HIT_DAMAGE = 10;                                         // percent of the hull per laser hit
 
@@ -276,6 +313,12 @@ function tick() {
     moving: hspeed > 1.2 || !player.grounded,                   // standing still keeps you hidden from the turrets
   }, { onFire: laserSound, onHit: takeHit, enabled: !dead });
 
+  fireCooldown = Math.max(0, fireCooldown - dt);
+  if (fireQueued) { fireQueued = false; if (!dead && fireCooldown <= 0) { shootMissile(); fireCooldown = FIRE_EVERY; } }
+  missiles.update(dt, { heightAt, world, trees, turrets, onExplode: onMissileExplode });
+  effects.update(dt);
+  for (const w of wrecks) w.update(clock.elapsedTime);
+
   trees.update(player.pos);
   rivers.update(dt);
   pilot.update(clock.elapsedTime, player.pos, dt, { resolve: world.resolve });
@@ -304,7 +347,7 @@ function tick() {
   });
   renderer.clearDepth();
   renderer.render(cockpit.scene, cockpit.camera);
-  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rocks ${rocks.count}  turrets ${turrets.count}  rivers ${rivers.count}`;
+  hud.textContent = `build ${BUILD}  seed ${seed}  alt ${player.pos.y.toFixed(0)}m  grass x${grass.repeat.x}  trees ${trees.count}  rocks ${rocks.count}  turrets ${turrets.count}/${turrets.total}  rivers ${rivers.count}`;
   requestAnimationFrame(tick);
 }
 tick();

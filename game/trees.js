@@ -81,7 +81,9 @@ export function makePines({ heightAt, maxH, seed, size, avoid, exclude, candidat
   const group = new THREE.Group();
   const chunks = [];
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), p = new THREE.Vector3(), col = new THREE.Color();
-  let total = 0;
+  let total = 0, alive = 0;
+  const grid = new Map();   // coarse spatial index so shots can find the trees near them
+  const CELL = 16, cellKey = (x, z) => Math.floor(x / CELL) * 73856093 ^ Math.floor(z / CELL) * 19349663;
   const colliders = [];     // trunk cylinders (with a margin to keep the camera out of the branches)
 
   buckets.forEach((trees, idx) => {
@@ -100,10 +102,55 @@ export function makePines({ heightAt, maxH, seed, size, avoid, exclude, candidat
     });
     for (const mesh of [near, far]) { mesh.instanceMatrix.needsUpdate = true; mesh.instanceColor.needsUpdate = true; mesh.computeBoundingSphere(); group.add(mesh); }
     const cx = ((idx % CHUNKS) + 0.5) / CHUNKS * size - size / 2, cz = (Math.floor(idx / CHUNKS) + 0.5) / CHUNKS * size - size / 2;
-    for (const t of trees) colliders.push({ x: t.x, z: t.z, r: 1.1 * t.s });
-    chunks.push({ near, far, cx, cz, n: trees.length });
-    total += trees.length;
+    const chunk = { near, far, cx, cz, n: trees.length };
+    trees.forEach((t, i) => {
+      t.chunk = chunk; t.i = i; t.alive = true;
+      t.collider = { x: t.x, z: t.z, r: 1.1 * t.s, dead: false };      // flagged dead when the tree is blown up
+      colliders.push(t.collider);
+      const k = cellKey(t.x, t.z);
+      if (!grid.has(k)) grid.set(k, []);
+      grid.get(k).push(t);
+    });
+    chunks.push(chunk);
+    total += trees.length; alive += trees.length;
   });
+
+  const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+  const near3 = (x, z) => {                    // trees in the 3x3 cells around a point
+    const out = [];
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) { const l = grid.get(cellKey(x + dx * CELL, z + dz * CELL)); if (l) out.push(...l); }
+    return out;
+  };
+
+  // the live tree whose branches contain this point, or null
+  function hitTest(pt) {
+    for (const t of near3(pt.x, pt.z)) {
+      if (!t.alive) continue;
+      const rel = pt.y - t.y, h = 9.6 * t.s;
+      if (rel < -0.5 || rel > h) continue;
+      const r = Math.max(0.5 * t.s, 1.7 * t.s * (1 - 0.8 * rel / h));     // narrower toward the top, like the cones
+      if (Math.hypot(pt.x - t.x, pt.z - t.z) < r) return t;
+    }
+    return null;
+  }
+
+  function destroy(t) {
+    if (!t.alive) return;
+    t.alive = false; alive--;
+    t.collider.dead = true;
+    t.chunk.near.setMatrixAt(t.i, ZERO); t.chunk.far.setMatrixAt(t.i, ZERO);
+    t.chunk.near.instanceMatrix.needsUpdate = true; t.chunk.far.instanceMatrix.needsUpdate = true;
+  }
+
+  // blow up every tree within `radius` (horizontally) of an explosion; returns the trees destroyed
+  function destroyWithin(x, y, z, radius) {
+    const gone = [];
+    for (const t of near3(x, z)) {
+      if (!t.alive || Math.hypot(t.x - x, t.z - z) > radius || Math.abs(t.y - y) > 14) continue;
+      destroy(t); gone.push(t);
+    }
+    return gone;
+  }
 
   const chunkR = size / CHUNKS * 0.71;   // half-diagonal of a chunk
   function update(camPos) {
@@ -117,5 +164,5 @@ export function makePines({ heightAt, maxH, seed, size, avoid, exclude, candidat
     nearGeo.dispose(); farGeo.dispose(); mat.dispose();
     for (const c of chunks) { c.near.dispose(); c.far.dispose(); }
   }
-  return { group, update, dispose, count: total, colliders };
+  return { group, update, dispose, colliders, hitTest, destroy, destroyWithin, get count() { return alive; }, total };
 }

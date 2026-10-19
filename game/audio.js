@@ -132,3 +132,33 @@ export function deathSound() {
   osc.connect(gain).connect(ctx.destination);
   osc.start(t); osc.stop(t + 1.75);
 }
+
+// --- missiles ---
+// Launch: a rising rocket whoosh.
+export function missileLaunch() {
+  if (!ctx || ctx.state !== 'running') return;
+  const t = ctx.currentTime, len = Math.floor(ctx.sampleRate * 0.5), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1);
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 0.9;
+  bp.frequency.setValueAtTime(500, t); bp.frequency.exponentialRampToValueAtTime(2600, t + 0.45);
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.11, t + 0.04); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+  src.connect(bp).connect(g).connect(ctx.destination); src.start(t);
+}
+
+// Explosion: a low boom plus a rumbling noise tail, quieter with distance.
+export function explosionSound(dist = 50) {
+  if (!ctx || ctx.state !== 'running') return;
+  const vol = Math.max(0.05, 1 - dist / 500), t = ctx.currentTime;
+  const boom = ctx.createOscillator(), bg = ctx.createGain();
+  boom.type = 'sine'; boom.frequency.setValueAtTime(110, t); boom.frequency.exponentialRampToValueAtTime(28, t + 0.6);
+  bg.gain.setValueAtTime(0.5 * vol, t); bg.gain.exponentialRampToValueAtTime(0.0001, t + 0.7);
+  boom.connect(bg).connect(ctx.destination); boom.start(t); boom.stop(t + 0.75);
+  const len = Math.floor(ctx.sampleRate * 1.0), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2);
+  const noise = ctx.createBufferSource(); noise.buffer = buf;
+  const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(2200, t); lp.frequency.exponentialRampToValueAtTime(260, t + 0.9);
+  const ng = ctx.createGain(); ng.gain.value = 0.35 * vol;
+  noise.connect(lp).connect(ng).connect(ctx.destination); noise.start(t);
+}
