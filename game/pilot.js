@@ -37,13 +37,18 @@ export function makePilot({ from, heightAt, riverDistance, size, seed, distance 
   const glove = mat(0xe5e5e2), visorMat = mat(0xd2a64a, { metalness: 0.9, roughness: 0.2 });
   const geos = [], add = (parent, geo, material, x = 0, y = 0, z = 0) => { geos.push(geo); const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); parent.add(m); return m; };
 
-  // legs and boots
-  for (const sx of [-1, 1]) {
-    add(body, new THREE.CylinderGeometry(0.085, 0.07, 0.85, 8), suit, sx * 0.1, 0.55, 0);
-    add(body, new THREE.CylinderGeometry(0.09, 0.09, 0.05, 8), orange, sx * 0.1, 0.8, 0);          // thigh band
-    add(body, new THREE.BoxGeometry(0.15, 0.1, 0.3), gray, sx * 0.1, 0.06, 0.05);                  // boot
-    add(body, new THREE.BoxGeometry(0.16, 0.03, 0.31), dark, sx * 0.1, 0.015, 0.05);               // sole
-  }
+  // legs and boots, each on a hip pivot so they can swing when running
+  const HIP = 0.975;
+  const legs = [-1, 1].map((sx) => {
+    const hip = new THREE.Group();
+    hip.position.set(sx * 0.1, HIP, 0);
+    body.add(hip);
+    add(hip, new THREE.CylinderGeometry(0.085, 0.07, 0.85, 8), suit, 0, 0.55 - HIP, 0);
+    add(hip, new THREE.CylinderGeometry(0.09, 0.09, 0.05, 8), orange, 0, 0.8 - HIP, 0);            // thigh band
+    add(hip, new THREE.BoxGeometry(0.15, 0.1, 0.3), gray, 0, 0.06 - HIP, 0.05);                    // boot
+    add(hip, new THREE.BoxGeometry(0.16, 0.03, 0.31), dark, 0, 0.015 - HIP, 0.05);                 // sole
+    return hip;
+  });
   // hips and belt
   add(body, new THREE.BoxGeometry(0.36, 0.2, 0.22), suitShade, 0, 1.0, 0);
   add(body, new THREE.BoxGeometry(0.38, 0.05, 0.24), orange, 0, 1.1, 0);
@@ -109,22 +114,78 @@ export function makePilot({ from, heightAt, riverDistance, size, seed, distance 
   add(helmet, new THREE.TorusGeometry(0.13, 0.02, 5, 14), gray, 0, -0.1, 0).rotation.x = Math.PI / 2;
   helmet.rotation.y = 0.3;
 
-  let facing = null;
+  // --- behaviour: wave until the player comes close and in view, then run over to them ---
+  const SPOT_DIST = 15.24;      // 50 feet
+  const STOP_DIST = 3.2;        // stop this far from the player
+  const RUN_SPEED = 4.6;        // m/s
+  const lerp = (a, b, t) => a + (b - a) * t;
+  body.rotation.order = 'YXZ';  // turn first, then lean forward in the facing direction
+  let state = 'waiting';        // 'waiting' -> 'running' (stays running once they've spotted you)
+  let facing = null, runW = 0, phase = 0, speedNow = 0;
+  const eye = new THREE.Vector3(), look = new THREE.Vector3();
+
+  // clear sight between two points over the terrain
+  function canSee(from, to) {
+    const n = Math.max(2, Math.ceil(from.distanceTo(to) / 2));
+    for (let i = 1; i < n; i++) {
+      const t = i / n, x = from.x + (to.x - from.x) * t, z = from.z + (to.z - from.z) * t, y = from.y + (to.y - from.y) * t;
+      if (heightAt(x, z) > y) return false;
+    }
+    return true;
+  }
+
   return {
-    group, x, z,
-    // wave, sway and turn to face the player
-    update(t, playerPos, dt = 0.016) {
-      const target = Math.atan2(playerPos.x - group.position.x, playerPos.z - group.position.z);
+    group,
+    get x() { return group.position.x; },        // live, so the radar follows the pilot as they run
+    get z() { return group.position.z; },
+    get state() { return state; },
+    // opts.resolve(pos, feetY, prevX, prevZ) pushes the pilot out of trees and rocks (optional)
+    update(t, playerPos, dt = 0.016, opts = {}) {
+      const gp = group.position;
+      const dx = playerPos.x - gp.x, dz = playerPos.z - gp.z, dist = Math.hypot(dx, dz);
+
+      if (state === 'waiting' && dist < SPOT_DIST) {
+        eye.set(gp.x, gp.y + 2.4, gp.z);
+        look.set(playerPos.x, playerPos.y, playerPos.z);
+        if (canSee(eye, look)) state = 'running';                    // they've seen you!
+      }
+
+      // run toward the player until close, then stand and wave again
+      speedNow = 0;
+      if (state === 'running' && dist > STOP_DIST) {
+        const step = Math.min(RUN_SPEED * dt, dist - STOP_DIST + 0.05);
+        const px = gp.x, pz = gp.z;
+        gp.x += (dx / dist) * step;
+        gp.z += (dz / dist) * step;
+        opts.resolve?.(gp, gp.y, px, pz);
+        gp.y = heightAt(gp.x, gp.z);
+        speedNow = Math.hypot(gp.x - px, gp.z - pz) / Math.max(dt, 1e-4);
+      }
+
+      // turn to face the player
+      const target = Math.atan2(dx, dz);
       if (facing === null) facing = target;
       let d = target - facing; d = Math.atan2(Math.sin(d), Math.cos(d));
-      facing += d * Math.min(1, dt * 2.5);
+      facing += d * Math.min(1, dt * (speedNow > 0 ? 8 : 2.5));
       body.rotation.y = facing;
-      right.elbow.rotation.z = 0.15 + Math.sin(t * 6.5) * 0.55;                  // forearm waves side to side
-      right.shoulder.rotation.z = 2.55 + Math.sin(t * 6.5 + 1) * 0.06;
-      left.shoulder.rotation.x = Math.sin(t * 1.4) * 0.04;
-      body.rotation.z = Math.sin(t * 1.2) * 0.015;                              // tiny weight shift
-      head.rotation.z = Math.sin(t * 1.7) * 0.05;
-      head.rotation.y = Math.sin(t * 0.9) * 0.12;
+
+      // blend from the waving pose to the running pose
+      runW += ((speedNow > 0.5 ? 1 : 0) - runW) * Math.min(1, dt * 8);
+      phase += dt * (6 + speedNow * 1.4) * (runW > 0.05 ? 1 : 0);
+      const swing = Math.sin(phase);
+      legs[0].rotation.x = swing * 0.85 * runW;
+      legs[1].rotation.x = -swing * 0.85 * runW;
+      right.shoulder.rotation.z = lerp(2.55 + Math.sin(t * 6.5 + 1) * 0.06, 0.18, runW);
+      right.shoulder.rotation.x = lerp(-0.15, swing * 0.95, runW);
+      right.elbow.rotation.z = lerp(0.15 + Math.sin(t * 6.5) * 0.55, 0, runW);   // the wave fades out
+      right.elbow.rotation.x = lerp(0, -1.15, runW);
+      left.shoulder.rotation.x = lerp(Math.sin(t * 1.4) * 0.04, -swing * 0.8, runW);
+      left.elbow.rotation.x = lerp(-0.75, -1.0, runW);
+      body.rotation.x = 0.16 * runW;                                              // lean into the run
+      body.position.y = Math.abs(Math.sin(phase)) * 0.07 * runW;                  // bounce
+      body.rotation.z = Math.sin(t * 1.2) * 0.015 * (1 - runW);                   // tiny weight shift when standing
+      head.rotation.z = Math.sin(t * 1.7) * 0.05 * (1 - runW);
+      head.rotation.y = Math.sin(t * 0.9) * 0.12 * (1 - runW);
     },
     dispose() { geos.forEach((g) => g.dispose()); [suit, suitShade, orange, gray, dark, skin, hair, glove, visorMat].forEach((m) => m.dispose()); },
   };
