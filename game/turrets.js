@@ -132,6 +132,7 @@ export function makeTurrets({ heightAt, maxH, size, seed }) {
   function update(dt, time, player, { onFire, onHit, enabled = true } = {}) {
     // idle animation
     for (const t of turrets) {
+      if (t.dead) continue;
       t.ring.rotation.x = Math.PI / 2 + Math.sin(time * 0.8 + t.phase) * 0.5;
       t.ring.rotation.z = time * 1.4 + t.phase;
       const charging = t.charge >= 0;
@@ -145,6 +146,7 @@ export function makeTurrets({ heightAt, maxH, size, seed }) {
 
     // firing logic
     for (const t of turrets) {
+      if (t.dead) continue;                                      // a destroyed turret never fires again
       if (!live) { t.charge = -1; continue; }
       if (t.charge >= 0) {                                       // winding up to fire
         t.charge += dt;
@@ -178,10 +180,23 @@ export function makeTurrets({ heightAt, maxH, size, seed }) {
     return hits;
   }
 
+  // destroy every live turret within `radius` of a point (3D); returns where they were
+  function damageAt(x, y, z, radius) {
+    const killed = [];
+    for (const t of turrets) {
+      if (t.dead || Math.hypot(t.pos.x - x, t.pos.y - y, t.pos.z - z) > radius) continue;
+      t.dead = true; t.charge = -1; t.g.visible = false;
+      killed.push({ x: t.pos.x, y: t.pos.y, z: t.pos.z });
+    }
+    return killed;
+  }
+  // is a live turret within `radius` of this point? (a missile's proximity fuse)
+  const nearTurret = (x, y, z, radius) => turrets.some((t) => !t.dead && Math.hypot(t.pos.x - x, t.pos.y - y, t.pos.z - z) < radius);
+
   function clearBolts() { for (const b of bolts) { b.active = false; b.obj.visible = false; } }
 
   return {
-    group, update, clearBolts, peaks, count: turrets.length,
+    group, update, clearBolts, peaks, damageAt, nearTurret, total: turrets.length, get count() { return turrets.filter((t) => !t.dead).length; },
     resetGrace(s = 5) { state.grace = s; },
     activeBolts: () => bolts.filter((b) => b.active).length,
     dispose() { coreGeo.dispose(); coreMat.dispose(); ringGeo.dispose(); ringMat.dispose(); glowMat.dispose(); glowTex.dispose(); boltGeo.dispose(); boltMat.dispose(); },

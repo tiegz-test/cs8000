@@ -31,7 +31,7 @@ export function makeCollisionWorld() {
     // colliders: trees { x, z, r } and rocks { x, z, r, cy, h }, as plain arrays
     set(trees, rocks) {
       grid = new Map();
-      for (const t of trees) insert({ kind: 0, x: t.x, z: t.z, r: t.r }, t.r + PLAYER_RADIUS);
+      for (const t of trees) insert({ kind: 0, x: t.x, z: t.z, r: t.r, src: t }, t.r + PLAYER_RADIUS);
       for (const r of rocks) insert({ kind: 1, ...r }, r.r + PLAYER_RADIUS);
     },
 
@@ -48,6 +48,7 @@ export function makeCollisionWorld() {
       for (let pass = 0; pass < 3; pass++) {
         let moved = false;
         for (const c of near(pos.x, pos.z)) {
+          if (c.src && c.src.dead) continue;                      // that tree has been blown up
           let dx = pos.x - c.x, dz = pos.z - c.z, d = Math.hypot(dx, dz);
           let edge;                                              // distance from the collider's center we must stay beyond
           if (c.kind === 0) edge = c.r + PLAYER_RADIUS;
