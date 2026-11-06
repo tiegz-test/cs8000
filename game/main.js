@@ -203,7 +203,7 @@ const releaseJump = (e) => { e.stopPropagation(); touchJumpHeld = false; };
 jumpBtn.addEventListener('touchend', releaseJump);
 jumpBtn.addEventListener('touchcancel', releaseJump);
 let fireQueued = false, fireCooldown = 0;
-const FIRE_EVERY = 0.55;                                       // s between missiles
+const FIRE_EVERY = 0.2;                                        // s between missiles (5 shots a second)
 addEventListener('mousedown', (e) => {                         // left mouse button fires at the crosshair
   if (e.button === 0 && startEl.style.display === 'none') fireQueued = true;
 });

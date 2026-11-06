@@ -7,7 +7,7 @@ const SPEED = 130;            // m/s
 const MAX_RANGE = 700;        // m
 const STEP = 3;               // m: collision sampling along the flight path
 const TURRET_FUSE = 9;        // m: "the general area of a turret"
-const MAX_MISSILES = 8;
+const MAX_MISSILES = 32;          // enough in flight for a fast burst: 0.2 s between shots x ~5 s of flight
 
 export const BLAST_TREES = 5.5;    // m: trees within this of the blast are destroyed
 export const BLAST_TURRET = 10;    // m: turrets within this of the blast are destroyed
